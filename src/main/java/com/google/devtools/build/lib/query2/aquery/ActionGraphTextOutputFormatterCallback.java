@@ -27,7 +27,6 @@ import com.google.devtools.build.lib.actions.ActionExecutionMetadata;
 import com.google.devtools.build.lib.actions.ActionKeyContext;
 import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.Artifact;
-import com.google.devtools.build.lib.actions.ArtifactPathResolver;
 import com.google.devtools.build.lib.actions.CommandAction;
 import com.google.devtools.build.lib.actions.CommandLineExpansionException;
 import com.google.devtools.build.lib.analysis.AspectValue;
@@ -44,7 +43,6 @@ import com.google.devtools.build.lib.events.ExtendedEventHandler;
 import com.google.devtools.build.lib.packages.AspectDescriptor;
 import com.google.devtools.build.lib.query2.engine.QueryEnvironment.TargetAccessor;
 import com.google.devtools.build.lib.skyframe.RuleConfiguredTargetValue;
-import com.google.devtools.build.lib.skyframe.SkyframeExecutor;
 import com.google.devtools.build.lib.util.CommandDescriptionForm;
 import com.google.devtools.build.lib.util.CommandFailureUtils;
 import com.google.devtools.build.lib.util.ShellEscaper;
@@ -71,11 +69,10 @@ class ActionGraphTextOutputFormatterCallback extends AqueryThreadsafeCallback {
       ExtendedEventHandler eventHandler,
       AqueryOptions options,
       OutputStream out,
-      SkyframeExecutor skyframeExecutor,
       TargetAccessor<KeyedConfiguredTargetValue> accessor,
       AqueryActionFilter actionFilters,
       RepositoryMapping mainRepoMapping) {
-    super(eventHandler, options, out, skyframeExecutor, accessor);
+    super(eventHandler, options, out, accessor);
     this.actionFilters = actionFilters;
     this.mainRepoMapping = mainRepoMapping;
   }
@@ -144,7 +141,7 @@ class ActionGraphTextOutputFormatterCallback extends AqueryThreadsafeCallback {
         .append('\n');
 
     if (actionOwner != null) {
-      BuildEvent configuration = actionOwner.getConfiguration();
+      BuildEvent configuration = actionOwner.getBuildConfigurationEvent();
       BuildEventStreamProtos.Configuration configProto =
           configuration.asStreamProto(/*context=*/ null).getConfiguration();
 
@@ -281,6 +278,7 @@ class ActionGraphTextOutputFormatterCallback extends AqueryThreadsafeCallback {
                           .map(a -> escapeBytestringUtf8(a))
                           .collect(toImmutableList()),
                   /* environment= */ null,
+                  /* environmentVariablesToClear= */ null,
                   /* cwd= */ null,
                   action.getOwner().getConfigurationChecksum(),
                   action.getExecutionPlatform() == null
@@ -322,15 +320,14 @@ class ActionGraphTextOutputFormatterCallback extends AqueryThreadsafeCallback {
     }
 
     if (action instanceof TemplateExpansionAction) {
+      TemplateExpansionAction templateExpansionAction = (TemplateExpansionAction) action;
       stringBuilder
           .append("  Template: ")
-          .append(
-              ((TemplateExpansionAction) action)
-                  .getTemplate()
-                  .getContent(ArtifactPathResolver.IDENTITY))
+          .append(AqueryUtils.getTemplateContent(templateExpansionAction))
           .append("\n");
+
       stringBuilder.append("  Substitutions: [\n");
-      for (Substitution substitution : ((TemplateExpansionAction) action).getSubstitutions()) {
+      for (Substitution substitution : templateExpansionAction.getSubstitutions()) {
         stringBuilder
             .append("    {")
             .append(substitution.getKey())

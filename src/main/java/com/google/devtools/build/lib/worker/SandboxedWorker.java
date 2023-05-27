@@ -14,6 +14,8 @@
 
 package com.google.devtools.build.lib.worker;
 
+import static com.google.devtools.build.lib.sandbox.LinuxSandboxCommandLineBuilder.NetworkNamespace.NETNS;
+
 import com.google.auto.value.AutoValue;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
@@ -34,7 +36,6 @@ import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.Symlinks;
 import java.io.File;
 import java.io.IOException;
-import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 import java.util.SortedMap;
@@ -162,9 +163,7 @@ final class SandboxedWorker extends SingleplexWorker {
       }
     }
     // TODO(larsrc): Handle hermetic tmp
-    for (Map.Entry<Path, Path> bindMount : bindMounts.entrySet()) {
-      result.add(BindMount.of(bindMount.getKey(), bindMount.getValue()));
-    }
+    bindMounts.forEach((k, v) -> result.add(BindMount.of(k, v)));
     LinuxSandboxUtil.validateBindMounts(bindMounts);
     return result.build();
   }
@@ -179,6 +178,7 @@ final class SandboxedWorker extends SingleplexWorker {
       Path sandboxTmp = workDir.getParentDirectory().getRelative(TMP_DIR_MOUNT_NAME);
       sandboxTmp.createDirectoryAndParents();
 
+      // Mostly tests require network, and some blaze run commands, but no workers.
       LinuxSandboxCommandLineBuilder commandLineBuilder =
           LinuxSandboxCommandLineBuilder.commandLineBuilder(
                   this.hardenedSandboxOptions.sandboxBinary(), args)
@@ -187,8 +187,7 @@ final class SandboxedWorker extends SingleplexWorker {
               .setPersistentProcess(true)
               .setBindMounts(getBindMounts(workDir, sandboxTmp))
               .setUseFakeHostname(this.hardenedSandboxOptions.fakeHostname())
-              // Mostly tests require network, and some blaze run commands, but no workers.
-              .setCreateNetworkNamespace(true)
+              .setCreateNetworkNamespace(NETNS)
               .setUseDebugMode(hardenedSandboxOptions.debugMode());
 
       if (hardenedSandboxOptions.memoryLimit() > 0) {

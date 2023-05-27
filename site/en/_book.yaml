@@ -95,12 +95,12 @@ upper_tabs:
     other:
     - name: Releases
       contents:
-      - title: Overview
+      - title: Release model
         path: /release/
-      - title: Release versioning
-        path: /release/versioning
       - title: Backward compatibility
         path: /release/backward-compatibility
+      - title: Rule compatibility
+        path: /release/rule-compatibility
     - name: Basics
       contents:
       - heading: Getting started with BUILD files
@@ -150,8 +150,6 @@ upper_tabs:
         path: /configure/attributes
       - title: Integrating with C++ rules
         path: /configure/integrate-cpp
-      - title: Implementing toolchain resolution
-        path: /configure/toolchain-resolution
       - title: Code coverage with Bazel
         path: /configure/coverage
       - heading: Optimizing Bazel
@@ -161,13 +159,15 @@ upper_tabs:
         path: /configure/windows
       - heading: Build performance
       - title: Extracting build performance metrics
-        path: /configure/build-performance-metrics
+        path: /advanced/performance/build-performance-metrics
       - title: Breaking down build performance
-        path: /configure/build-performance-breakdown
+        path: /advanced/performance/build-performance-breakdown
       - title: JSON trace profile
-        path: /configure/json-trace-profile
+        path: /advanced/performance/json-trace-profile
       - title: Optimize memory
-        path: /configure/memory
+        path: /advanced/performance/memory
+      - title: Optimize build iteration speed
+        path: /advanced/performance/iteration-speed
     - name: Remote execution
       contents:
       - heading: Remote build execution (RBE)
@@ -270,8 +270,12 @@ upper_tabs:
         path: /extending/repo
       - title: Configuring
         path: /extending/config
-      - title: Platforms and toolchains
+      - title: Platforms
         path: /extending/platforms
+      - title: Toolchains
+        path: /extending/toolchains
+      - title: Execution groups
+        path: /extending/exec-groups
     - name: Writing rules
       contents:
       - title: Creating a rule
@@ -307,12 +311,6 @@ upper_tabs:
       - title: Document rules with Stardoc
         path: https://github.com/bazelbuild/stardoc
         status: external
-    - name: Design docs
-      contents:
-      - title: Execution groups
-        path: /extending/exec-groups
-      - title: Toolchains
-        path: /extending/toolchains
     - name: APIs
       contents:
       - title: Build file API
@@ -338,6 +336,8 @@ upper_tabs:
         path: /contribute/codebase
       - title: Searching the codebase
         path: /contribute/search
+      - title: StateMachine Guide
+        path: /contribute/statemachine-guide
       - heading: Contribute documentation
       - title: Overview
         path: /contribute/docs

@@ -10,8 +10,8 @@ filegroup(
     testonly = 0,
     srcs = glob(["**"]) + [
         "//src/test/java/com/google/devtools/build/lib/remote/downloader:srcs",
-        "//src/test/java/com/google/devtools/build/lib/remote/http:srcs",
         "//src/test/java/com/google/devtools/build/lib/remote/grpc:srcs",
+        "//src/test/java/com/google/devtools/build/lib/remote/http:srcs",
         "//src/test/java/com/google/devtools/build/lib/remote/logging:srcs",
         "//src/test/java/com/google/devtools/build/lib/remote/merkletree:srcs",
         "//src/test/java/com/google/devtools/build/lib/remote/options:srcs",
@@ -34,7 +34,6 @@ NATIVE_SSL_TEST_MAYBE = select({
 
 java_test(
     name = "remote",
-    size = "small",
     srcs = glob(
         ["**/*.java"],
         exclude = NATIVE_SSL_TEST + [
@@ -74,7 +73,9 @@ java_test(
         "//src/main/java/com/google/devtools/build/lib/pkgcache",
         "//src/main/java/com/google/devtools/build/lib/remote",
         "//src/main/java/com/google/devtools/build/lib/remote:abstract_action_input_prefetcher",
+        "//src/main/java/com/google/devtools/build/lib/remote:remote_output_checker",
         "//src/main/java/com/google/devtools/build/lib/remote/common",
+        "//src/main/java/com/google/devtools/build/lib/remote/common:bulk_transfer_exception",
         "//src/main/java/com/google/devtools/build/lib/remote/common:cache_not_found_exception",
         "//src/main/java/com/google/devtools/build/lib/remote/disk",
         "//src/main/java/com/google/devtools/build/lib/remote/grpc",
@@ -84,6 +85,7 @@ java_test(
         "//src/main/java/com/google/devtools/build/lib/remote/util",
         "//src/main/java/com/google/devtools/build/lib/runtime/commands",
         "//src/main/java/com/google/devtools/build/lib/skyframe:tree_artifact_value",
+        "//src/main/java/com/google/devtools/build/lib/testing/vfs:spied_filesystem",
         "//src/main/java/com/google/devtools/build/lib/util",
         "//src/main/java/com/google/devtools/build/lib/util:abrupt_exit_exception",
         "//src/main/java/com/google/devtools/build/lib/util:exit_code",
@@ -137,6 +139,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/actions:artifacts",
         "//src/main/java/com/google/devtools/build/lib/actions:file_metadata",
         "//src/main/java/com/google/devtools/build/lib/skyframe:action_execution_value",
+        "//src/main/java/com/google/devtools/build/lib/skyframe:tree_artifact_value",
         "//src/main/java/com/google/devtools/build/lib/util:os",
         "//src/main/java/com/google/devtools/build/lib/util/io",
         "//src/main/java/com/google/devtools/build/lib/vfs",

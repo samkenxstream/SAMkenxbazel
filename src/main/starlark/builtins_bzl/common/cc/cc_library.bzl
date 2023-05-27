@@ -467,7 +467,7 @@ def _identifier_of_library(library):
     if library.dynamic_library != None:
         return _identifier_of_artifact(library.dynamic_library)
     if library.interface_library != None:
-        return _identifier_of_artifact(library.interface_libary)
+        return _identifier_of_artifact(library.interface_library)
 
     return None
 
@@ -598,6 +598,7 @@ attrs = {
     ),
     "_def_parser": semantics.get_def_parser(),
     "_cc_toolchain": attr.label(default = "@" + semantics.get_repo() + "//tools/cpp:current_cc_toolchain"),
+    "_use_auto_exec_groups": attr.bool(default = True),
 }
 attrs.update(semantics.get_distribs_attr())
 attrs.update(semantics.get_loose_mode_in_hdrs_check_allowed_attr())
@@ -613,7 +614,6 @@ cc_library = rule(
     incompatible_use_toolchain_transition = True,
     provides = [CcInfo],
     exec_groups = {
-        "cpp_link": exec_group(copy_from_rule = True),
+        "cpp_link": exec_group(toolchains = cc_helper.use_cpp_toolchain()),
     },
-    compile_one_filetype = [".cc", ".h", ".c"],
 )

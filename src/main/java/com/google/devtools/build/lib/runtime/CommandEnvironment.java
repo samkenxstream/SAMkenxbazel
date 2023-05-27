@@ -20,13 +20,15 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSortedMap;
 import com.google.common.eventbus.EventBus;
-import com.google.devtools.build.lib.actions.MetadataProvider;
+import com.google.common.eventbus.Subscribe;
+import com.google.devtools.build.lib.actions.InputMetadataProvider;
 import com.google.devtools.build.lib.actions.ResourceManager;
 import com.google.devtools.build.lib.analysis.AnalysisOptions;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
+import com.google.devtools.build.lib.analysis.BuildInfoEvent;
 import com.google.devtools.build.lib.analysis.config.CoreOptions;
-import com.google.devtools.build.lib.buildtool.BuildRequestOptions;
 import com.google.devtools.build.lib.clock.Clock;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.concurrent.QuiescingExecutors;
@@ -112,11 +114,12 @@ public class CommandEnvironment {
   private final BuildResultListener buildResultListener;
   private final CommandLinePathFactory commandLinePathFactory;
 
-  private final boolean mergedAnalysisAndExecution;
+  private boolean mergedAnalysisAndExecution;
 
   private OutputService outputService;
   private String workspaceName;
   private boolean hasSyncedPackageLoading = false;
+  private boolean buildInfoPosted = false;
   @Nullable private WorkspaceInfoFromDiff workspaceInfoFromDiff;
 
   // This AtomicReference is set to:
@@ -130,7 +133,7 @@ public class CommandEnvironment {
   private final Object fileCacheLock = new Object();
 
   @GuardedBy("fileCacheLock")
-  private MetadataProvider fileCache;
+  private InputMetadataProvider fileCache;
 
   private class BlazeModuleEnvironment implements BlazeModule.ModuleEnvironment {
     @Nullable
@@ -234,6 +237,7 @@ public class CommandEnvironment {
       this.packageLocator = null;
     }
     workspace.getSkyframeExecutor().setEventBus(eventBus);
+    eventBus.register(this);
 
     ClientOptions clientOptions =
         Preconditions.checkNotNull(
@@ -284,49 +288,6 @@ public class CommandEnvironment {
 
     this.commandLinePathFactory =
         CommandLinePathFactory.create(runtime.getFileSystem(), directories);
-
-    this.mergedAnalysisAndExecution =
-        determineIfRunningWithMergedAnalysisAndExecution(
-            options, command.name(), packageLocator, warnings);
-  }
-
-  private static boolean determineIfRunningWithMergedAnalysisAndExecution(
-      OptionsParsingResult options,
-      String commandName,
-      @Nullable PathPackageLocator packageLocator,
-      List<String> warnings) {
-    BuildRequestOptions buildRequestOptions = options.getOptions(BuildRequestOptions.class);
-    // --nobuild means no execution will be carried out, hence it doesn't make sense to interleave
-    // analysis and execution in that case and --experimental_merged_skyframe_analysis_execution
-    // should be ignored.
-    // Aquery and Cquery implicitly set --nobuild, so there's no need to have a warning here: it
-    // makes no different from the users' perspective.
-    if (buildRequestOptions != null
-        && buildRequestOptions.mergedSkyframeAnalysisExecutionDoNotUseDirectly
-        && !buildRequestOptions.performExecutionPhase
-        && !(commandName.equals("aquery") || commandName.equals("cquery"))) {
-      warnings.add(
-          "--experimental_merged_skyframe_analysis_execution is incompatible with --nobuild and"
-              + " will be ignored.");
-    }
-
-    boolean valueFromFlags =
-        buildRequestOptions != null
-            && buildRequestOptions.mergedSkyframeAnalysisExecutionDoNotUseDirectly
-            && buildRequestOptions.performExecutionPhase;
-    boolean havingMultiPackagePath =
-        packageLocator != null && packageLocator.getPathEntries().size() > 1;
-
-    // TODO(b/246324830): Skymeld and multi-package_path are incompatible.
-    if (valueFromFlags && havingMultiPackagePath) {
-      warnings.add(
-          "--experimental_merged_skyframe_analysis_execution is "
-              + "incompatible with multiple --package_path ("
-              + packageLocator.getPathEntries()
-              + ") and its value will be ignored.");
-    }
-
-    return valueFromFlags && !havingMultiPackagePath;
   }
 
   private Path computeWorkingDirectory(CommonCommandOptions commandOptions)
@@ -477,8 +438,15 @@ public class CommandEnvironment {
    * This should be the source of truth for whether this build should be run with merged analysis
    * and execution phases.
    */
-  public boolean withMergedAnalysisAndExecution() {
+  public boolean withMergedAnalysisAndExecutionSourceOfTruth() {
     return mergedAnalysisAndExecution;
+  }
+
+  public void setMergedAnalysisAndExecution(boolean value) {
+    mergedAnalysisAndExecution = value;
+    getSkyframeExecutor()
+        .setMergedSkyframeAnalysisExecutionSupplier(
+            this::withMergedAnalysisAndExecutionSourceOfTruth);
   }
 
   private Map<String, String> filterClientEnv(Set<String> vars) {
@@ -580,9 +548,11 @@ public class CommandEnvironment {
   /**
    * Returns the working directory of the server.
    *
-   * <p>This is often the first entry on the {@code --package_path}, but not always.
-   * Callers should certainly not make this assumption. The Path returned may be null.
+   * <p>This is often the first entry on the {@code --package_path}, but not always. Callers should
+   * certainly not make this assumption. The Path returned may be null; for example, when the
+   * command is invoked outside a workspace.
    */
+  @Nullable
   public Path getWorkspace() {
     return getDirectories().getWorkingDirectory();
   }
@@ -852,7 +822,7 @@ public class CommandEnvironment {
   }
 
   /** Returns the file cache to use during this build. */
-  public MetadataProvider getFileCache() {
+  public InputMetadataProvider getFileCache() {
     synchronized (fileCacheLock) {
       if (fileCache == null) {
         fileCache =
@@ -908,5 +878,22 @@ public class CommandEnvironment {
 
   public CommandLinePathFactory getCommandLinePathFactory() {
     return commandLinePathFactory;
+  }
+
+  public void ensureBuildInfoPosted() {
+    if (buildInfoPosted) {
+      return;
+    }
+    ImmutableSortedMap<String, String> workspaceStatus =
+        workspace
+            .getWorkspaceStatusActionFactory()
+            .createDummyWorkspaceStatus(workspaceInfoFromDiff);
+    eventBus.post(new BuildInfoEvent(workspaceStatus));
+  }
+
+  @Subscribe
+  @SuppressWarnings("unused")
+  void gotBuildInfo(BuildInfoEvent event) {
+    buildInfoPosted = true;
   }
 }

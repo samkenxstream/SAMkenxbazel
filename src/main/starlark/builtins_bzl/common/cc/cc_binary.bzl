@@ -15,7 +15,7 @@
 """cc_binary Starlark implementation replacing native"""
 
 load(":common/cc/semantics.bzl", "semantics")
-load(":common/cc/experimental_cc_shared_library.bzl", "GraphNodeInfo", "build_exports_map_from_only_dynamic_deps", "build_link_once_static_libs_map", "merge_cc_shared_library_infos", "throw_linked_but_not_exported_errors")
+load(":common/cc/cc_shared_library.bzl", "GraphNodeInfo", "build_exports_map_from_only_dynamic_deps", "build_link_once_static_libs_map", "merge_cc_shared_library_infos", "separate_static_and_dynamic_link_libraries", "throw_linked_but_not_exported_errors")
 load(":common/cc/cc_helper.bzl", "cc_helper", "linker_mode")
 load(":common/cc/cc_info.bzl", "CcInfo")
 load(":common/cc/cc_common.bzl", "cc_common")
@@ -34,7 +34,7 @@ _WATCHOS_DEVICE_TARGET_CPUS = ["watchos_armv7k", "watchos_arm64_32"]
 _TVOS_SIMULATOR_TARGET_CPUS = ["tvos_x86_64", "tvos_sim_arm64"]
 _TVOS_DEVICE_TARGET_CPUS = ["tvos_arm64"]
 _CATALYST_TARGET_CPUS = ["catalyst_x86_64"]
-_MACOS_TARGET_CPUS = ["darwin_x86_64", "darwin_arm64", "darwin_arm64e", "darwin"]
+_MACOS_TARGET_CPUS = ["darwin_x86_64", "darwin_arm64", "darwin_arm64e"]
 
 def _strip_extension(file):
     if file.extension == "":
@@ -97,6 +97,7 @@ def _create_intermediate_dwp_packagers(ctx, dwp_output, cc_toolchain, dwp_files,
                     mnemonic = "CcGenerateIntermediateDwp",
                     tools = packager["tools"],
                     executable = packager["executable"],
+                    toolchain = cc_helper.CPP_TOOLCHAIN_TYPE,
                     arguments = [packager["arguments"]],
                     inputs = packager["inputs"],
                     outputs = packager["outputs"],
@@ -141,6 +142,7 @@ def _create_debug_packager_actions(ctx, cc_toolchain, dwp_output, dwo_files):
         mnemonic = "CcGenerateDwp",
         tools = packager["tools"],
         executable = packager["executable"],
+        toolchain = cc_helper.CPP_TOOLCHAIN_TYPE,
         arguments = [packager["arguments"]],
         inputs = packager["inputs"],
         outputs = packager["outputs"],
@@ -329,29 +331,6 @@ def _collect_transitive_dwo_artifacts(cc_compilation_outputs, cc_debug_context, 
             transitive_dwo_files = cc_debug_context.files
     return depset(dwo_files, transitive = [transitive_dwo_files])
 
-def _separate_static_and_dynamic_link_libraries(direct_children, can_be_linked_dynamically):
-    link_statically_labels = {}
-    link_dynamically_labels = {}
-    all_children = list(direct_children)
-    seen_labels = {}
-
-    # Some of the logic here is a duplicate from cc_shared_library.
-    # But some parts are different hence rewriting.
-    for i in range(2147483647):
-        if i == len(all_children):
-            break
-        node = all_children[i]
-        node_label = str(node.label)
-        if node_label in seen_labels:
-            continue
-        seen_labels[node_label] = True
-        if node_label in can_be_linked_dynamically:
-            link_dynamically_labels[node_label] = True
-        else:
-            link_statically_labels[node_label] = True
-            all_children.extend(node.children)
-    return (link_statically_labels, link_dynamically_labels)
-
 def _filter_libraries_that_are_linked_dynamically(ctx, cc_linking_context, cpp_config):
     merged_cc_shared_library_infos = merge_cc_shared_library_infos(ctx)
     link_once_static_libs_map = build_link_once_static_libs_map(merged_cc_shared_library_infos)
@@ -368,7 +347,7 @@ def _filter_libraries_that_are_linked_dynamically(ctx, cc_linking_context, cpp_c
         if owner in exports_map:
             can_be_linked_dynamically[owner] = True
 
-    (link_statically_labels, link_dynamically_labels) = _separate_static_and_dynamic_link_libraries(graph_structure_aspect_nodes, can_be_linked_dynamically)
+    (link_statically_labels, link_dynamically_labels) = separate_static_and_dynamic_link_libraries(graph_structure_aspect_nodes, can_be_linked_dynamically)
 
     linker_inputs_seen = {}
     linked_statically_but_not_exported = {}
@@ -386,18 +365,7 @@ def _filter_libraries_that_are_linked_dynamically(ctx, cc_linking_context, cpp_c
 
     throw_linked_but_not_exported_errors(linked_statically_but_not_exported)
 
-    rule_impl_debug_files = None
-    if cpp_config.experimental_cc_shared_library_debug():
-        debug_linker_inputs_file = ["Owner: " + str(ctx.label)]
-        for linker_input in static_linker_inputs:
-            debug_linker_inputs_file.append(str(linker_input.owner))
-        link_once_static_libs_debug_file = ctx.actions.declare_file(ctx.label.name + "_link_once_static_libs.txt")
-        ctx.actions.write(link_once_static_libs_debug_file, "\n".join(debug_linker_inputs_file), False)
-        transitive_debug_files_list = []
-        for dep in ctx.attr.dynamic_deps:
-            transitive_debug_files_list.append(dep[OutputGroupInfo].rule_impl_debug_files)
-        rule_impl_debug_files = depset([link_once_static_libs_debug_file], transitive = transitive_debug_files_list)
-    return (cc_common.create_linking_context(linker_inputs = depset(exports_map.values() + static_linker_inputs, order = "topological")), rule_impl_debug_files)
+    return cc_common.create_linking_context(linker_inputs = depset(exports_map.values() + static_linker_inputs, order = "topological"))
 
 def _create_transitive_linking_actions(
         ctx,
@@ -468,7 +436,7 @@ def _create_transitive_linking_actions(
         owner = ctx.label,
         libraries = depset(libraries_for_current_cc_linking_context),
         user_link_flags = cc_helper.linkopts(ctx, additional_make_variable_substitutions, cc_toolchain) + additional_linkopts,
-        additional_inputs = depset(cc_helper.linker_scripts(ctx) + compilation_context.transitive_compilation_prerequisites().to_list()),
+        additional_inputs = depset(cc_helper.linker_scripts(ctx)),
     )
     current_cc_linking_context = cc_common.create_linking_context(linker_inputs = depset([linker_inputs]))
 
@@ -477,9 +445,8 @@ def _create_transitive_linking_actions(
     cc_info = cc_common.merge_cc_infos(cc_infos = [cc_info_without_extra_link_time_libraries, extra_link_time_libraries_cc_info])
     cc_linking_context = cc_info.linking_context
 
-    rule_impl_debug_files = None
     if len(ctx.attr.dynamic_deps) > 0:
-        cc_linking_context, rule_impl_debug_files = _filter_libraries_that_are_linked_dynamically(ctx, cc_linking_context, cpp_config)
+        cc_linking_context = _filter_libraries_that_are_linked_dynamically(ctx, cc_linking_context, cpp_config)
     link_deps_statically = True
     if linking_mode == linker_mode.LINKING_DYNAMIC:
         link_deps_statically = False
@@ -510,7 +477,7 @@ def _create_transitive_linking_actions(
         win_def_file = win_def_file,
     )
     cc_launcher_info = cc_internal.create_cc_launcher_info(cc_info = cc_info_without_extra_link_time_libraries, compilation_outputs = cc_compilation_outputs_with_only_objects)
-    return (cc_linking_outputs, cc_launcher_info, rule_impl_debug_files, cc_linking_context)
+    return (cc_linking_outputs, cc_launcher_info, cc_linking_context)
 
 def _use_pic(ctx, cc_toolchain, cpp_config, feature_configuration):
     if _is_link_shared(ctx):
@@ -723,7 +690,7 @@ def cc_binary_impl(ctx, additional_linkopts):
     if extra_link_time_libraries != None:
         linker_inputs_extra, runtime_libraries_extra = extra_link_time_libraries.build_libraries(ctx = ctx, static_mode = linking_mode != linker_mode.LINKING_DYNAMIC, for_dynamic_library = _is_link_shared(ctx))
 
-    cc_linking_outputs_binary, cc_launcher_info, rule_impl_debug_files, deps_cc_linking_context = _create_transitive_linking_actions(
+    cc_linking_outputs_binary, cc_launcher_info, deps_cc_linking_context = _create_transitive_linking_actions(
         ctx,
         cc_toolchain,
         feature_configuration,
@@ -836,9 +803,6 @@ def cc_binary_impl(ctx, additional_linkopts):
     if generated_def_file != None:
         output_groups["def_file"] = depset([generated_def_file])
 
-    if rule_impl_debug_files != None:
-        output_groups["rule_impl_debug_files"] = rule_impl_debug_files
-
     if cc_linking_outputs_binary_library != None:
         # For consistency and readability.
         library_to_link = cc_linking_outputs_binary_library
@@ -925,9 +889,9 @@ def make_cc_binary(cc_binary_attrs, **kwargs):
             "stripped_binary": "%{name}.stripped",
             "dwp_file": "%{name}.dwp",
         },
-        fragments = ["google_cpp", "cpp"],
+        fragments = ["cpp"] + semantics.additional_fragments(),
         exec_groups = {
-            "cpp_link": exec_group(copy_from_rule = True),
+            "cpp_link": exec_group(toolchains = cc_helper.use_cpp_toolchain()),
         },
         toolchains = cc_helper.use_cpp_toolchain() +
                      semantics.get_runtimes_toolchain(),

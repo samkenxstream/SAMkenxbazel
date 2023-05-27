@@ -19,7 +19,6 @@ import static com.google.common.collect.MoreCollectors.onlyElement;
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.common.truth.Truth.assertWithMessage;
 import static com.google.devtools.build.lib.actions.util.ActionsTestUtil.baseArtifactNames;
-import static com.google.devtools.build.lib.rules.apple.AppleBitcodeConverter.INVALID_APPLE_BITCODE_OPTION_FORMAT;
 import static com.google.devtools.build.lib.rules.objc.CompilationSupport.ABSOLUTE_INCLUDES_PATH_FORMAT;
 import static com.google.devtools.build.lib.rules.objc.CompilationSupport.BOTH_MODULE_NAME_AND_MODULE_MAP_SPECIFIED;
 import static com.google.devtools.build.lib.rules.objc.ObjcProvider.CC_LIBRARY;
@@ -66,8 +65,8 @@ import com.google.devtools.build.lib.rules.cpp.CppLinkAction;
 import com.google.devtools.build.lib.rules.cpp.CppRuleClasses;
 import com.google.devtools.build.lib.rules.cpp.LibraryToLink;
 import com.google.devtools.common.options.OptionsParsingException;
+import java.util.Collection;
 import java.util.List;
-import java.util.Set;
 import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -77,13 +76,8 @@ import org.junit.runners.JUnit4;
 @RunWith(JUnit4.class)
 public class ObjcLibraryTest extends ObjcRuleTestCase {
 
-  static final RuleType RULE_TYPE = new OnlyNeedsSourcesRuleType("objc_library");
+  private static final RuleType RULE_TYPE = new OnlyNeedsSourcesRuleType("objc_library");
   private static final String WRAPPED_CLANG = "wrapped_clang";
-  /** Creates an {@code objc_library} target writer. */
-  @Override
-  protected ScratchAttributeWriter createLibraryTargetWriter(String labelString) {
-    return ScratchAttributeWriter.fromLabelString(this, "objc_library", labelString);
-  }
 
   @Test
   public void testConfigTransitionWithTopLevelAppleConfiguration() throws Exception {
@@ -125,15 +119,21 @@ public class ObjcLibraryTest extends ObjcRuleTestCase {
         .write();
 
     createLibraryTargetWriter("//objc/lib2")
+        .setAndCreateFiles("srcs", "b.m")
+        .setAndCreateFiles("hdrs", "private.h")
+        .write();
+
+    createLibraryTargetWriter("//objc/lib3")
         .setAndCreateFiles("srcs", "a.m")
         .setAndCreateFiles("hdrs", "hdr.h")
         .setList("deps", "//objc/lib1")
+        .setList("implementation_deps", "//objc/lib2")
         .write();
 
     createLibraryTargetWriter("//objc:x")
         .setAndCreateFiles("srcs", "a.m", "private.h")
         .setAndCreateFiles("hdrs", "hdr.h")
-        .setList("deps", "//objc/lib2:lib2")
+        .setList("deps", "//objc/lib3:lib3")
         .write();
 
     CppCompileAction compileA = (CppCompileAction) compileAction("//objc:x", "a.o");
@@ -682,201 +682,6 @@ public class ObjcLibraryTest extends ObjcRuleTestCase {
   }
 
   @Test
-  public void testCompilationActionsWithEmbeddedBitcode() throws Exception {
-    useConfiguration(
-        "--apple_platform_type=ios", "--ios_multi_cpus=arm64", "--apple_bitcode=embedded");
-    createLibraryTargetWriter("//objc:lib")
-        .setAndCreateFiles("srcs", "a.m", "b.m", "private.h")
-        .setAndCreateFiles("hdrs", "c.h")
-        .write();
-
-    CommandAction compileActionA = compileAction("//objc:lib", "a.o");
-
-    assertThat(compileActionA.getArguments()).contains("-fembed-bitcode");
-  }
-
-  @Test
-  public void testCompilationActionsWithEmbeddedBitcodeMarkers() throws Exception {
-    useConfiguration(
-        "--apple_platform_type=ios", "--ios_multi_cpus=arm64", "--apple_bitcode=embedded_markers");
-
-    createLibraryTargetWriter("//objc:lib")
-        .setAndCreateFiles("srcs", "a.m", "b.m", "private.h")
-        .setAndCreateFiles("hdrs", "c.h")
-        .write();
-
-    CommandAction compileActionA = compileAction("//objc:lib", "a.o");
-
-    assertThat(compileActionA.getArguments()).contains("-fembed-bitcode-marker");
-  }
-
-  @Test
-  public void testCompilationActionsWithNoBitcode() throws Exception {
-    useConfiguration("--apple_platform_type=ios", "--ios_multi_cpus=arm64", "--apple_bitcode=none");
-
-    createLibraryTargetWriter("//objc:lib")
-        .setAndCreateFiles("srcs", "a.m", "b.m", "private.h")
-        .setAndCreateFiles("hdrs", "c.h")
-        .write();
-
-    CommandAction compileActionA = compileAction("//objc:lib", "a.o");
-
-    assertThat(compileActionA.getArguments()).doesNotContain("-fembed-bitcode");
-    assertThat(compileActionA.getArguments()).doesNotContain("-fembed-bitcode-marker");
-  }
-
-  /**
-   * Tests that bitcode is disabled for simulator builds even if enabled by flag.
-   */
-  @Test
-  public void testCompilationActionsWithBitcode_simulator() throws Exception {
-    useConfiguration(
-        "--apple_platform_type=ios", "--ios_multi_cpus=x86_64", "--apple_bitcode=embedded");
-
-    createLibraryTargetWriter("//objc:lib")
-        .setAndCreateFiles("srcs", "a.m", "b.m", "private.h")
-        .setAndCreateFiles("hdrs", "c.h")
-        .write();
-
-    CommandAction compileActionA = compileAction("//objc:lib", "a.o");
-
-    assertThat(compileActionA.getArguments()).doesNotContain("-fembed-bitcode");
-    assertThat(compileActionA.getArguments()).doesNotContain("-fembed-bitcode-marker");
-  }
-
-  @Test
-  public void testCompilationActionsWithEmbeddedBitcodeForMultiplePlatformsWithMatch()
-      throws Exception {
-    useConfiguration(
-        "--apple_platform_type=ios",
-        "--ios_multi_cpus=arm64",
-        "--apple_bitcode=ios=embedded",
-        "--apple_bitcode=watchos=embedded");
-    createLibraryTargetWriter("//objc:lib")
-        .setAndCreateFiles("srcs", "a.m", "b.m", "private.h")
-        .setAndCreateFiles("hdrs", "c.h")
-        .write();
-
-    CommandAction compileActionA = compileAction("//objc:lib", "a.o");
-
-    assertThat(compileActionA.getArguments()).contains("-fembed-bitcode");
-  }
-
-  @Test
-  public void testCompilationActionsWithEmbeddedBitcodeForMultiplePlatformsWithoutMatch()
-      throws Exception {
-    useConfiguration(
-        "--apple_platform_type=ios",
-        "--ios_multi_cpus=arm64",
-        "--apple_bitcode=tvos=embedded",
-        "--apple_bitcode=watchos=embedded");
-    createLibraryTargetWriter("//objc:lib")
-        .setAndCreateFiles("srcs", "a.m", "b.m", "private.h")
-        .setAndCreateFiles("hdrs", "c.h")
-        .write();
-
-    CommandAction compileActionA = compileAction("//objc:lib", "a.o");
-
-    assertThat(compileActionA.getArguments()).doesNotContain("-fembed-bitcode");
-    assertThat(compileActionA.getArguments()).doesNotContain("-fembed-bitcode-marker");
-  }
-
-  @Test
-  public void testLaterBitcodeOptionsOverrideEarlierOptionsForSamePlatform() throws Exception {
-    useConfiguration(
-        "--apple_platform_type=ios",
-        "--ios_multi_cpus=arm64",
-        "--apple_bitcode=ios=embedded",
-        "--apple_bitcode=ios=embedded_markers");
-    createLibraryTargetWriter("//objc:lib")
-        .setAndCreateFiles("srcs", "a.m", "b.m", "private.h")
-        .setAndCreateFiles("hdrs", "c.h")
-        .write();
-
-    CommandAction compileActionA = compileAction("//objc:lib", "a.o");
-
-    assertThat(compileActionA.getArguments()).doesNotContain("-fembed-bitcode");
-    assertThat(compileActionA.getArguments()).contains("-fembed-bitcode-marker");
-  }
-
-  @Test
-  public void testLaterBitcodeOptionWithoutPlatformOverridesEarlierOptionWithPlatform()
-      throws Exception {
-    useConfiguration(
-        "--apple_platform_type=ios",
-        "--ios_multi_cpus=arm64",
-        "--apple_bitcode=ios=embedded",
-        "--apple_bitcode=embedded_markers");
-    createLibraryTargetWriter("//objc:lib")
-        .setAndCreateFiles("srcs", "a.m", "b.m", "private.h")
-        .setAndCreateFiles("hdrs", "c.h")
-        .write();
-
-    CommandAction compileActionA = compileAction("//objc:lib", "a.o");
-
-    assertThat(compileActionA.getArguments()).doesNotContain("-fembed-bitcode");
-    assertThat(compileActionA.getArguments()).contains("-fembed-bitcode-marker");
-  }
-
-  @Test
-  public void testLaterPlatformBitcodeOptionWithPlatformOverridesEarlierOptionWithoutPlatform()
-      throws Exception {
-    useConfiguration(
-        "--apple_platform_type=ios",
-        "--ios_multi_cpus=arm64",
-        "--apple_bitcode=embedded",
-        "--apple_bitcode=ios=embedded_markers");
-    createLibraryTargetWriter("//objc:lib")
-        .setAndCreateFiles("srcs", "a.m", "b.m", "private.h")
-        .setAndCreateFiles("hdrs", "c.h")
-        .write();
-
-    CommandAction compileActionA = compileAction("//objc:lib", "a.o");
-
-    assertThat(compileActionA.getArguments()).doesNotContain("-fembed-bitcode");
-    assertThat(compileActionA.getArguments()).contains("-fembed-bitcode-marker");
-  }
-
-  @Test
-  public void testAppleBitcode_invalidPlatformNameGivesError() throws Exception {
-    checkBitcodeModeError(
-        "--apple_platform_type=ios",
-        "--ios_multi_cpus=arm64",
-        "--apple_bitcode=ios=embedded",
-        "--apple_bitcode=nachos=embedded");
-  }
-
-  @Test
-  public void testAppleBitcode_invalidBitcodeModeGivesError() throws Exception {
-    checkBitcodeModeError(
-        "--apple_platform_type=ios", "--ios_multi_cpus=arm64", "--apple_bitcode=indebted");
-  }
-
-  @Test
-  public void testAppleBitcode_invalidBitcodeModeWithPlatformGivesError() throws Exception {
-    checkBitcodeModeError(
-        "--apple_platform_type=ios", "--ios_multi_cpus=arm64", "--apple_bitcode=ios=indebted");
-  }
-
-  @Test
-  public void testAppleBitcode_emptyBitcodeModeGivesError() throws Exception {
-    checkBitcodeModeError(
-        "--apple_platform_type=ios", "--ios_multi_cpus=arm64", "--apple_bitcode=ios=");
-  }
-
-  @Test
-  public void testAppleBitcode_emptyValueGivesError() throws Exception {
-    checkBitcodeModeError(
-        "--apple_platform_type=ios", "--ios_multi_cpus=arm64", "--apple_bitcode=");
-  }
-
-  private void checkBitcodeModeError(String... args) throws Exception {
-    OptionsParsingException thrown =
-        assertThrows(OptionsParsingException.class, () -> useConfiguration(args));
-    assertThat(thrown).hasMessageThat().contains(INVALID_APPLE_BITCODE_OPTION_FORMAT);
-  }
-
-  @Test
   public void testCompilationActionsWithCoptFmodules() throws Exception {
     createLibraryTargetWriter("//objc:lib")
         .setAndCreateFiles("srcs", "a.m", "b.m", "private.h")
@@ -1070,24 +875,38 @@ public class ObjcLibraryTest extends ObjcRuleTestCase {
             .setAndCreateFiles("srcs", "a.m", "b.m", "private.h")
             .setAndCreateFiles("hdrs", "a.h", "b.h")
             .write();
+    ConfiguredTarget impltarget =
+        createLibraryTargetWriter("//objc_impl:lib")
+            .setAndCreateFiles("srcs", "a.m", "b.m", "private.h")
+            .setAndCreateFiles("hdrs", "a.h", "b.h")
+            .write();
     ConfiguredTarget depender =
-        createLibraryTargetWriter("//objc2:lib")
+        createLibraryTargetWriter("//objc_depender:lib")
             .setAndCreateFiles("srcs", "a.m", "b.m", "private.h")
             .setAndCreateFiles("hdrs", "c.h", "d.h")
             .setList("deps", "//objc:lib")
+            .setList("implementation_deps", "//objc_impl:lib")
             .write();
 
     assertThat(getArifactPaths(target, LIBRARY)).containsExactly("objc/liblib.a");
-    assertThat(getArifactPaths(depender, LIBRARY)).containsExactly(
-        "objc/liblib.a", "objc2/liblib.a");
+    assertThat(getArifactPaths(impltarget, LIBRARY)).containsExactly("objc_impl/liblib.a");
+    assertThat(getArifactPaths(depender, LIBRARY))
+        .containsExactly("objc/liblib.a", "objc_impl/liblib.a", "objc_depender/liblib.a");
     assertThat(getArifactPathsOfLibraries(target)).containsExactly("objc/liblib.a");
     assertThat(getArifactPathsOfLibraries(depender))
-        .containsExactly("objc/liblib.a", "objc2/liblib.a");
+        .containsExactly("objc/liblib.a", "objc_impl/liblib.a", "objc_depender/liblib.a");
     assertThat(getArifactPathsOfHeaders(target))
         .containsExactly("objc/a.h", "objc/b.h", "objc/private.h");
+    assertThat(getArifactPathsOfHeaders(impltarget))
+        .containsExactly("objc_impl/a.h", "objc_impl/b.h", "objc_impl/private.h");
     assertThat(getArifactPathsOfHeaders(depender))
         .containsExactly(
-            "objc/a.h", "objc/b.h", "objc/private.h", "objc2/c.h", "objc2/d.h", "objc2/private.h");
+            "objc/a.h",
+            "objc/b.h",
+            "objc/private.h",
+            "objc_depender/c.h",
+            "objc_depender/d.h",
+            "objc_depender/private.h");
   }
 
   private static Iterable<String> getArifactPaths(
@@ -1286,7 +1105,7 @@ public class ObjcLibraryTest extends ObjcRuleTestCase {
   }
 
   @Test
-  public void testIosSdkVersionCannotBeDefinedButEmpty() throws Exception {
+  public void testIosSdkVersionCannotBeDefinedButEmpty() {
     OptionsParsingException e =
         assertThrows(OptionsParsingException.class, () -> useConfiguration("--ios_sdk_version="));
     assertThat(e).hasMessageThat().contains("--ios_sdk_version");
@@ -1383,7 +1202,7 @@ public class ObjcLibraryTest extends ObjcRuleTestCase {
   }
 
   // Converts output artifacts into expected command-line arguments.
-  protected List<String> outputArgs(Set<Artifact> outputs) {
+  private ImmutableList<String> outputArgs(Collection<Artifact> outputs) {
     ImmutableList.Builder<String> result = new ImmutableList.Builder<>();
     for (String outputConfig : Artifact.toExecPaths(outputs)) {
       String output = removeConfigFragment(outputConfig);
@@ -1804,13 +1623,14 @@ public class ObjcLibraryTest extends ObjcRuleTestCase {
     assertThat(action).contains("-iquote foo/bar");
     assertThat(action).contains("-iquote bam/baz");
   }
+
   @Test
   public void testCollectCodeCoverageWithGCOVFlags() throws Exception {
     useConfiguration("--collect_code_coverage");
     createLibraryTargetWriter("//objc:x")
         .setAndCreateFiles("srcs", "a.mm", "b.cc", "c.mm", "d.cxx", "e.c", "f.m", "g.C")
         .write();
-    List<String> copts = ImmutableList.of("-fprofile-arcs", "-ftest-coverage");
+    ImmutableList<String> copts = ImmutableList.of("-fprofile-arcs", "-ftest-coverage");
     assertThat(compileAction("//objc:x", "a.o").getArguments()).containsAtLeastElementsIn(copts);
     assertThat(compileAction("//objc:x", "b.o").getArguments()).containsAtLeastElementsIn(copts);
     assertThat(compileAction("//objc:x", "c.o").getArguments()).containsAtLeastElementsIn(copts);
@@ -1826,7 +1646,8 @@ public class ObjcLibraryTest extends ObjcRuleTestCase {
     createLibraryTargetWriter("//objc:x")
         .setAndCreateFiles("srcs", "a.mm", "b.cc", "c.mm", "d.cxx", "e.c", "f.m", "g.C")
         .write();
-    List<String> copts = ImmutableList.of("-fprofile-instr-generate", "-fcoverage-mapping");
+    ImmutableList<String> copts =
+        ImmutableList.of("-fprofile-instr-generate", "-fcoverage-mapping");
     assertThat(compileAction("//objc:x", "a.o").getArguments()).containsAtLeastElementsIn(copts);
     assertThat(compileAction("//objc:x", "b.o").getArguments()).containsAtLeastElementsIn(copts);
     assertThat(compileAction("//objc:x", "c.o").getArguments()).containsAtLeastElementsIn(copts);
@@ -1834,7 +1655,7 @@ public class ObjcLibraryTest extends ObjcRuleTestCase {
     assertThat(compileAction("//objc:x", "e.o").getArguments()).containsAtLeastElementsIn(copts);
     assertThat(compileAction("//objc:x", "f.o").getArguments()).containsAtLeastElementsIn(copts);
     assertThat(compileAction("//objc:x", "g.o").getArguments()).containsAtLeastElementsIn(copts);
-   }
+  }
 
   @Test
   public void testNoG0IfGeneratesDsym() throws Exception {
@@ -2129,6 +1950,99 @@ public class ObjcLibraryTest extends ObjcRuleTestCase {
   }
 
   @Test
+  public void testAlwaysLinkDefaultFalse() throws Exception {
+    useConfiguration("--incompatible_objc_alwayslink_by_default=false");
+    addAppleBinaryStarlarkRule(scratch);
+
+    scratch.file(
+        "test/BUILD",
+        "load('//test_starlark:apple_binary_starlark.bzl', 'apple_binary_starlark')",
+        "apple_binary_starlark(",
+        "    name = 'objc_bin',",
+        "    platform_type = 'ios',",
+        "    deps = [':main_lib'],",
+        ")",
+        "objc_library(",
+        "    name = 'main_lib',",
+        "    srcs = ['b.m'],",
+        ")");
+
+    CommandAction testLinkAction = linkAction("//test:objc_bin");
+    assertThat(Joiner.on(" ").join(testLinkAction.getArguments())).doesNotContain("-force_load");
+  }
+
+  @Test
+  public void testAlwaysLinkDefaultTrue() throws Exception {
+    useConfiguration("--incompatible_objc_alwayslink_by_default");
+    addAppleBinaryStarlarkRule(scratch);
+
+    scratch.file(
+        "test/BUILD",
+        "load('//test_starlark:apple_binary_starlark.bzl', 'apple_binary_starlark')",
+        "apple_binary_starlark(",
+        "    name = 'objc_bin',",
+        "    platform_type = 'ios',",
+        "    deps = [':main_lib'],",
+        ")",
+        "objc_library(",
+        "    name = 'main_lib',",
+        "    srcs = ['b.m'],",
+        ")");
+    scratch.file("test/b.m", "// dummy file");
+
+    CommandAction testLinkAction = linkAction("//test:objc_bin");
+    assertThat(Joiner.on(" ").join(testLinkAction.getArguments()))
+        .containsMatch("-force_load [^ ]+-out/[^ ]+/test/libmain_lib.lo");
+  }
+
+  @Test
+  public void testAlwaysLinkTrueDefaultFalse() throws Exception {
+    useConfiguration("--incompatible_objc_alwayslink_by_default=false");
+    addAppleBinaryStarlarkRule(scratch);
+
+    scratch.file(
+        "test/BUILD",
+        "load('//test_starlark:apple_binary_starlark.bzl', 'apple_binary_starlark')",
+        "apple_binary_starlark(",
+        "    name = 'objc_bin',",
+        "    platform_type = 'ios',",
+        "    deps = [':main_lib'],",
+        ")",
+        "objc_library(",
+        "    name = 'main_lib',",
+        "    srcs = ['b.m'],",
+        "    alwayslink = True,",
+        ")");
+
+    CommandAction testLinkAction = linkAction("//test:objc_bin");
+    assertThat(Joiner.on(" ").join(testLinkAction.getArguments()))
+        .containsMatch("-force_load [^ ]+-out/[^ ]+/test/libmain_lib.lo");
+  }
+
+  @Test
+  public void testAlwaysLinkFalseDefaultTrue() throws Exception {
+    useConfiguration("--incompatible_objc_alwayslink_by_default");
+    addAppleBinaryStarlarkRule(scratch);
+
+    scratch.file(
+        "test/BUILD",
+        "load('//test_starlark:apple_binary_starlark.bzl', 'apple_binary_starlark')",
+        "apple_binary_starlark(",
+        "    name = 'objc_bin',",
+        "    platform_type = 'ios',",
+        "    deps = [':main_lib'],",
+        ")",
+        "objc_library(",
+        "    name = 'main_lib',",
+        "    srcs = ['b.m'],",
+        "    alwayslink = False,",
+        ")");
+
+    CommandAction testLinkAction = linkAction("//test:objc_bin");
+    assertThat(Joiner.on(" ").join(testLinkAction.getArguments())).doesNotContain("-force_load");
+  }
+
+  @Test
   public void testLinkActionMnemonic() throws Exception {
     scratchConfiguredTarget("foo", "x", "objc_library(name = 'x', srcs = ['a.m'])");
 
@@ -2136,7 +2050,7 @@ public class ObjcLibraryTest extends ObjcRuleTestCase {
     assertThat(archiveAction.getMnemonic()).isEqualTo("CppArchive");
   }
 
-  protected List<String> linkstampExecPaths(NestedSet<CcLinkingContext.Linkstamp> linkstamps) {
+  private static List<String> linkstampExecPaths(NestedSet<CcLinkingContext.Linkstamp> linkstamps) {
     return ActionsTestUtil.execPaths(
         ActionsTestUtil.transform(linkstamps.toList(), CcLinkingContext.Linkstamp::getArtifact));
   }
@@ -2319,41 +2233,6 @@ public class ObjcLibraryTest extends ObjcRuleTestCase {
         ")");
 
     getConfiguredTarget("//x:foo");
-  }
-
-  @Test
-  public void testRuntimeDeps() throws Exception {
-    scratch.file(
-        "x/defs.bzl",
-        "def _var_providing_rule_impl(ctx):",
-        "   return [",
-        "       CcInfo(),",
-        "       apple_common.new_dynamic_framework_provider(",
-        "           cc_info=ctx.attr.dep[CcInfo],",
-        "           objc=ctx.attr.dep[apple_common.Objc],",
-        "       )",
-        "   ]",
-        "var_providing_rule = rule(",
-        "   implementation = _var_providing_rule_impl,",
-        "   attrs = { 'dep': attr.label(),}",
-        ")");
-    scratch.file(
-        "x/BUILD",
-        "load('//x:defs.bzl', 'var_providing_rule')",
-        "objc_library(",
-        "    name = 'baz',",
-        "    srcs = ['baz.m'],",
-        ")",
-        "var_providing_rule(",
-        "    name = 'foo',",
-        "    dep = 'baz',",
-        ")",
-        "objc_library(",
-        "    name = 'bar',",
-        "    srcs = ['bar.m'],",
-        "    runtime_deps = [':foo'],",
-        ")");
-    getConfiguredTarget("//x:bar");
   }
 
   @Test

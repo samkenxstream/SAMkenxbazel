@@ -61,18 +61,18 @@ import com.google.devtools.build.lib.rules.apple.XcodeConfigRule;
 import com.google.devtools.build.lib.rules.cpp.CcCompilationContext;
 import com.google.devtools.build.lib.rules.cpp.CcInfo;
 import com.google.devtools.build.lib.rules.cpp.CcLinkingContext;
+import com.google.devtools.build.lib.rules.cpp.CcToolchain;
 import com.google.devtools.build.lib.rules.cpp.CcToolchainProvider;
 import com.google.devtools.build.lib.rules.cpp.CppConfiguration;
 import com.google.devtools.build.lib.rules.cpp.CppHelper;
 import com.google.devtools.build.lib.rules.cpp.CppModuleMap.UmbrellaHeaderStrategy;
 import com.google.devtools.build.lib.rules.cpp.CppRuleClasses;
 import com.google.devtools.build.lib.rules.cpp.CppSemantics;
-import com.google.devtools.build.lib.rules.java.JavaCompilationArgsProvider;
-import com.google.devtools.build.lib.rules.java.JavaGenJarsProvider;
 import com.google.devtools.build.lib.rules.java.JavaInfo;
 import com.google.devtools.build.lib.rules.java.JavaRuleClasses;
 import com.google.devtools.build.lib.rules.java.JavaSemantics;
 import com.google.devtools.build.lib.rules.java.JavaToolchainProvider;
+import com.google.devtools.build.lib.rules.objc.IntermediateArtifacts.AlwaysLink;
 import com.google.devtools.build.lib.rules.objc.J2ObjcSource.SourceType;
 import com.google.devtools.build.lib.rules.proto.ProtoCommon;
 import com.google.devtools.build.lib.rules.proto.ProtoConfiguration;
@@ -130,11 +130,6 @@ public class J2ObjcAspect extends NativeAspectClass implements ConfiguredAspectF
     this.javaToolchainTypeRequirement = JavaRuleClasses.javaToolchainTypeRequirement(env);
   }
 
-  /** Returns whether this aspect allows proto services to be generated from this proto rule */
-  protected boolean shouldAllowProtoServices(RuleContext ruleContext) {
-    return true;
-  }
-
   @Override
   public AspectDefinition getDefinition(AspectParameters aspectParameters) {
     return ConfigAwareAspectBuilder.of(new AspectDefinition.Builder(this))
@@ -154,19 +149,19 @@ public class J2ObjcAspect extends NativeAspectClass implements ConfiguredAspectF
         .addToolchainTypes(CppRuleClasses.ccToolchainTypeRequirement(ccToolchainType))
         .add(
             attr("$grep_includes", LABEL)
-                .cfg(ExecutionTransitionFactory.create())
+                .cfg(ExecutionTransitionFactory.createFactory())
                 .value(
                     Label.parseCanonicalUnchecked(toolsRepository + "//tools/cpp:grep-includes")))
         .add(
             attr("$j2objc", LABEL)
-                .cfg(ExecutionTransitionFactory.create("j2objc"))
+                .cfg(ExecutionTransitionFactory.createFactory("j2objc"))
                 .exec()
                 .value(
                     Label.parseCanonicalUnchecked(
                         toolsRepository + "//tools/j2objc:j2objc_deploy.jar")))
         .add(
             attr("$j2objc_wrapper", LABEL)
-                .cfg(ExecutionTransitionFactory.create("j2objc"))
+                .cfg(ExecutionTransitionFactory.createFactory("j2objc"))
                 .exec()
                 .legacyAllowAnyFileType()
                 .value(
@@ -174,7 +169,7 @@ public class J2ObjcAspect extends NativeAspectClass implements ConfiguredAspectF
                         toolsRepository + "//tools/j2objc:j2objc_wrapper_binary")))
         .add(
             attr("$j2objc_header_map", LABEL)
-                .cfg(ExecutionTransitionFactory.create("j2objc"))
+                .cfg(ExecutionTransitionFactory.createFactory("j2objc"))
                 .exec()
                 .legacyAllowAnyFileType()
                 .value(
@@ -182,19 +177,19 @@ public class J2ObjcAspect extends NativeAspectClass implements ConfiguredAspectF
                         toolsRepository + "//tools/j2objc:j2objc_header_map_binary")))
         .add(
             attr("$jre_emul_jar", LABEL)
-                .cfg(ExecutionTransitionFactory.create("j2objc"))
+                .cfg(ExecutionTransitionFactory.createFactory("j2objc"))
                 .value(
                     Label.parseCanonicalUnchecked(
                         toolsRepository + "//third_party/java/j2objc:jre_emul.jar")))
         .add(
             attr("$jre_emul_module", LABEL)
-                .cfg(ExecutionTransitionFactory.create("j2objc"))
+                .cfg(ExecutionTransitionFactory.createFactory("j2objc"))
                 .value(
                     Label.parseCanonicalUnchecked(
                         toolsRepository + "//third_party/java/j2objc:jre_emul_module")))
         .add(
             attr(":dead_code_report", LABEL)
-                .cfg(ExecutionTransitionFactory.create("j2objc"))
+                .cfg(ExecutionTransitionFactory.createFactory("j2objc"))
                 .value(DEAD_CODE_REPORT))
         .add(
             attr("$jre_lib", LABEL)
@@ -203,7 +198,7 @@ public class J2ObjcAspect extends NativeAspectClass implements ConfiguredAspectF
                         toolsRepository + "//third_party/java/j2objc:jre_core_lib")))
         .add(
             attr("$xcrunwrapper", LABEL)
-                .cfg(ExecutionTransitionFactory.create())
+                .cfg(ExecutionTransitionFactory.createFactory())
                 .exec()
                 .value(
                     Label.parseCanonicalUnchecked(toolsRepository + "//tools/objc:xcrunwrapper")))
@@ -211,11 +206,10 @@ public class J2ObjcAspect extends NativeAspectClass implements ConfiguredAspectF
             attr(XcodeConfigRule.XCODE_CONFIG_ATTR_NAME, LABEL)
                 .allowedRuleClasses("xcode_config")
                 .checkConstraints()
-                .direct_compile_time_input()
                 .value(AppleToolchain.getXcodeConfigLabel(toolsRepository)))
         .add(
             attr("$zipper", LABEL)
-                .cfg(ExecutionTransitionFactory.create())
+                .cfg(ExecutionTransitionFactory.createFactory())
                 .exec()
                 .value(Label.parseCanonicalUnchecked(toolsRepository + "//tools/zip:zipper")))
         .add(
@@ -224,10 +218,13 @@ public class J2ObjcAspect extends NativeAspectClass implements ConfiguredAspectF
                 .value(
                     getProtoToolchainLabel(
                         toolsRepository + "//tools/j2objc:j2objc_proto_toolchain")))
-        .add(attr(":j2objc_cc_toolchain", LABEL).value(ccToolchain))
         .add(
             attr(JavaRuleClasses.JAVA_TOOLCHAIN_TYPE_ATTRIBUTE_NAME, LABEL)
                 .value(javaToolchainTypeRequirement.toolchainType()))
+        .add(
+            attr(CcToolchain.CC_TOOLCHAIN_DEFAULT_ATTRIBUTE_NAME, LABEL)
+                .mandatoryProviders(CcToolchainProvider.PROVIDER.id())
+                .value(ccToolchain))
         .execGroups(
             ImmutableMap.of(
                 "proto_compiler",
@@ -250,7 +247,7 @@ public class J2ObjcAspect extends NativeAspectClass implements ConfiguredAspectF
     }
     try {
       return java(ct, ruleContext);
-    } catch (EvalException e) {
+    } catch (EvalException | RuleErrorException e) {
       ruleContext.ruleError(e.getMessage());
       return null;
     }
@@ -272,7 +269,7 @@ public class J2ObjcAspect extends NativeAspectClass implements ConfiguredAspectF
         ruleContext,
         /* archiveFileNameSuffix= */ "_j2objc",
         UmbrellaHeaderStrategy.GENERATE,
-        /* alwaysLinkLibraryExtension= */ false);
+        AlwaysLink.TRUE);
   }
 
   private ConfiguredAspect buildAspect(
@@ -303,7 +300,10 @@ public class J2ObjcAspect extends NativeAspectClass implements ConfiguredAspectF
 
       try {
         CcToolchainProvider ccToolchain =
-            CppHelper.getToolchain(ruleContext, ":j2objc_cc_toolchain");
+            CppHelper.getToolchain(
+                ruleContext,
+                ruleContext.getPrerequisite(CcToolchain.CC_TOOLCHAIN_DEFAULT_ATTRIBUTE_NAME),
+                ccToolchainType);
         ImmutableList<String> extraCompileArgs =
             j2objcCompileWithARC(ruleContext)
                 ? ImmutableList.of("-fno-strict-overflow", "-fobjc-arc-exceptions")
@@ -360,10 +360,8 @@ public class J2ObjcAspect extends NativeAspectClass implements ConfiguredAspectF
   }
 
   private ConfiguredAspect java(ConfiguredTarget base, RuleContext ruleContext)
-      throws InterruptedException, ActionConflictException, EvalException {
-    JavaCompilationArgsProvider compilationArgsProvider =
-        JavaInfo.getProvider(JavaCompilationArgsProvider.class, base);
-    JavaGenJarsProvider genJarProvider = JavaInfo.getProvider(JavaGenJarsProvider.class, base);
+      throws InterruptedException, ActionConflictException, EvalException, RuleErrorException {
+    NestedSet<Artifact> compileTimeJars = JavaInfo.transitiveCompileTimeJars(base);
     ImmutableSet.Builder<Artifact> javaSourceFilesBuilder = ImmutableSet.builder();
     ImmutableSet.Builder<Artifact> javaSourceJarsBuilder = ImmutableSet.builder();
 
@@ -383,9 +381,7 @@ public class J2ObjcAspect extends NativeAspectClass implements ConfiguredAspectF
       javaSourceJarsBuilder.add(srcJar);
     }
 
-    if (genJarProvider != null && genJarProvider.getGenSourceJar() != null) {
-      javaSourceJarsBuilder.add(genJarProvider.getGenSourceJar());
-    }
+    JavaInfo.genSourceJar(base).ifPresent(javaSourceJarsBuilder::add);
 
     ImmutableList<Artifact> javaSourceFiles = javaSourceFilesBuilder.build().asList();
     ImmutableList<Artifact> javaSourceJars = javaSourceJarsBuilder.build().asList();
@@ -403,7 +399,7 @@ public class J2ObjcAspect extends NativeAspectClass implements ConfiguredAspectF
               javaSourceFiles,
               javaSourceJars,
               depJ2ObjcMappingFileProvider,
-              compilationArgsProvider,
+              compileTimeJars,
               j2ObjcSource);
     }
     return buildAspect(
@@ -531,7 +527,7 @@ public class J2ObjcAspect extends NativeAspectClass implements ConfiguredAspectF
       ImmutableList<Artifact> sources,
       ImmutableList<Artifact> sourceJars,
       J2ObjcMappingFileProvider depJ2ObjcMappingFileProvider,
-      JavaCompilationArgsProvider compArgsProvider,
+      NestedSet<Artifact> compileTimeJars,
       J2ObjcSource j2ObjcSource)
       throws EvalException {
     CustomCommandLine.Builder argBuilder = CustomCommandLine.builder();
@@ -610,7 +606,6 @@ public class J2ObjcAspect extends NativeAspectClass implements ConfiguredAspectF
 
     argBuilder.add("-d").addPath(j2ObjcSource.getObjcFilePath());
 
-    NestedSet<Artifact> compileTimeJars = compArgsProvider.getTransitiveCompileTimeJars();
     if (!compileTimeJars.isEmpty()) {
       argBuilder.addExecPaths("-classpath", VectorArg.join(":").each(compileTimeJars));
     }

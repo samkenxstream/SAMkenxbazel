@@ -9,8 +9,8 @@ filegroup(
     name = "srcs",
     srcs = glob(["*"]) + [
         "//src/main/java/com/google/devtools/build/lib/remote/common:srcs",
-        "//src/main/java/com/google/devtools/build/lib/remote/downloader:srcs",
         "//src/main/java/com/google/devtools/build/lib/remote/disk:srcs",
+        "//src/main/java/com/google/devtools/build/lib/remote/downloader:srcs",
         "//src/main/java/com/google/devtools/build/lib/remote/grpc:srcs",
         "//src/main/java/com/google/devtools/build/lib/remote/http:srcs",
         "//src/main/java/com/google/devtools/build/lib/remote/logging:srcs",
@@ -33,8 +33,8 @@ java_library(
             "RemoteRetrier.java",
             "RemoteRetrierUtils.java",
             "Retrier.java",
+            "RemoteOutputChecker.java",
             "AbstractActionInputPrefetcher.java",
-            "ToplevelArtifactsDownloader.java",
             "LeaseService.java",
         ],
     ),
@@ -49,7 +49,7 @@ java_library(
         ":Retrier",
         ":abstract_action_input_prefetcher",
         ":lease_service",
-        ":toplevel_artifacts_downloader",
+        ":remote_output_checker",
         "//src/main/java/com/google/devtools/build/lib:build-request-options",
         "//src/main/java/com/google/devtools/build/lib:runtime",
         "//src/main/java/com/google/devtools/build/lib:runtime/command_line_path_factory",
@@ -86,6 +86,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/packages/semantics",
         "//src/main/java/com/google/devtools/build/lib/profiler",
         "//src/main/java/com/google/devtools/build/lib/remote/common",
+        "//src/main/java/com/google/devtools/build/lib/remote/common:bulk_transfer_exception",
         "//src/main/java/com/google/devtools/build/lib/remote/common:cache_not_found_exception",
         "//src/main/java/com/google/devtools/build/lib/remote/disk",
         "//src/main/java/com/google/devtools/build/lib/remote/downloader",
@@ -181,13 +182,33 @@ java_library(
 )
 
 java_library(
+    name = "remote_output_checker",
+    srcs = ["RemoteOutputChecker.java"],
+    deps = [
+        "//src/main/java/com/google/devtools/build/lib/actions:artifacts",
+        "//src/main/java/com/google/devtools/build/lib/actions:file_metadata",
+        "//src/main/java/com/google/devtools/build/lib/analysis:analysis_cluster",
+        "//src/main/java/com/google/devtools/build/lib/analysis:configured_target",
+        "//src/main/java/com/google/devtools/build/lib/analysis:provider_collection",
+        "//src/main/java/com/google/devtools/build/lib/analysis:top_level_artifact_context",
+        "//src/main/java/com/google/devtools/build/lib/clock",
+        "//src/main/java/com/google/devtools/build/lib/packages",
+        "//src/main/java/com/google/devtools/build/lib/skyframe:coverage_report_value",
+        "//third_party:guava",
+        "//third_party:jsr305",
+    ],
+)
+
+java_library(
     name = "abstract_action_input_prefetcher",
     srcs = ["AbstractActionInputPrefetcher.java"],
     deps = [
+        ":remote_output_checker",
         "//src/main/java/com/google/devtools/build/lib/actions",
         "//src/main/java/com/google/devtools/build/lib/actions:artifacts",
         "//src/main/java/com/google/devtools/build/lib/actions:file_metadata",
         "//src/main/java/com/google/devtools/build/lib/events",
+        "//src/main/java/com/google/devtools/build/lib/profiler",
         "//src/main/java/com/google/devtools/build/lib/remote/common:cache_not_found_exception",
         "//src/main/java/com/google/devtools/build/lib/remote/util",
         "//src/main/java/com/google/devtools/build/lib/vfs",
@@ -201,38 +222,15 @@ java_library(
 )
 
 java_library(
-    name = "toplevel_artifacts_downloader",
-    srcs = ["ToplevelArtifactsDownloader.java"],
-    deps = [
-        ":abstract_action_input_prefetcher",
-        "//src/main/java/com/google/devtools/build/lib/actions:artifacts",
-        "//src/main/java/com/google/devtools/build/lib/actions:file_metadata",
-        "//src/main/java/com/google/devtools/build/lib/analysis:analysis_cluster",
-        "//src/main/java/com/google/devtools/build/lib/analysis:configured_target",
-        "//src/main/java/com/google/devtools/build/lib/analysis:configured_target_value",
-        "//src/main/java/com/google/devtools/build/lib/analysis:test/coverage_report",
-        "//src/main/java/com/google/devtools/build/lib/packages",
-        "//src/main/java/com/google/devtools/build/lib/remote/util",
-        "//src/main/java/com/google/devtools/build/lib/skyframe:action_execution_value",
-        "//src/main/java/com/google/devtools/build/lib/skyframe:configured_target_key",
-        "//src/main/java/com/google/devtools/build/lib/skyframe:tree_artifact_value",
-        "//src/main/java/com/google/devtools/build/lib/util",
-        "//src/main/java/com/google/devtools/build/lib/vfs",
-        "//src/main/java/com/google/devtools/build/skyframe",
-        "//src/main/java/com/google/devtools/build/skyframe:skyframe-objects",
-        "//third_party:flogger",
-        "//third_party:guava",
-        "//third_party:jsr305",
-    ],
-)
-
-java_library(
     name = "lease_service",
     srcs = ["LeaseService.java"],
     deps = [
         "//src/main/java/com/google/devtools/build/lib/actions",
-        "//src/main/java/com/google/devtools/build/lib/actions:action_lookup_data",
         "//src/main/java/com/google/devtools/build/lib/actions:artifacts",
+        "//src/main/java/com/google/devtools/build/lib/actions:file_metadata",
+        "//src/main/java/com/google/devtools/build/lib/skyframe:action_execution_value",
+        "//src/main/java/com/google/devtools/build/lib/skyframe:sky_functions",
+        "//src/main/java/com/google/devtools/build/lib/skyframe:tree_artifact_value",
         "//src/main/java/com/google/devtools/build/skyframe",
         "//third_party:jsr305",
     ],

@@ -1,6 +1,7 @@
 load("@rules_java//java:defs.bzl", "java_binary", "java_library", "java_test")
 
 package(
+    default_applicable_licenses = ["//:license"],
     default_testonly = 1,
     default_visibility = ["//src:__subpackages__"],
 )
@@ -95,9 +96,9 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/exec:bin_tools",
         "//src/main/java/com/google/devtools/build/lib/exec:spawn_runner",
         "//src/main/java/com/google/devtools/build/lib/exec/local",
+        "//src/main/java/com/google/devtools/build/lib/metrics:ps_info_collector",
         "//src/main/java/com/google/devtools/build/lib/sandbox:sandbox_helpers",
         "//src/main/java/com/google/devtools/build/lib/util:abrupt_exit_exception",
-        "//src/main/java/com/google/devtools/build/lib/util:ps_info_collector",
         "//src/main/java/com/google/devtools/build/lib/util:resource_converter",
         "//src/main/java/com/google/devtools/build/lib/vfs",
         "//src/main/java/com/google/devtools/build/lib/vfs:pathfragment",
@@ -107,6 +108,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/worker:multiplex_worker",
         "//src/main/java/com/google/devtools/build/lib/worker:recording_input_stream",
         "//src/main/java/com/google/devtools/build/lib/worker:singleplex_worker",
+        "//src/main/java/com/google/devtools/build/lib/worker:worker_events",
         "//src/main/java/com/google/devtools/build/lib/worker:worker_exec_root",
         "//src/main/java/com/google/devtools/build/lib/worker:worker_factory",
         "//src/main/java/com/google/devtools/build/lib/worker:worker_files_hash",

@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.rules.java;
 
 import static com.google.devtools.build.lib.packages.BuildType.LABEL;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.RuleContext;
@@ -52,7 +53,8 @@ public final class JavaRuntimeInfo extends NativeInfo implements JavaRuntimeInfo
       NestedSet<Artifact> hermeticInputs,
       @Nullable Artifact libModules,
       @Nullable Artifact defaultCDS,
-      ImmutableList<CcInfo> hermeticStaticLibs) {
+      ImmutableList<CcInfo> hermeticStaticLibs,
+      int version) {
     return new JavaRuntimeInfo(
         javaBaseInputs,
         javaHome,
@@ -62,7 +64,8 @@ public final class JavaRuntimeInfo extends NativeInfo implements JavaRuntimeInfo
         hermeticInputs,
         libModules,
         defaultCDS,
-        hermeticStaticLibs);
+        hermeticStaticLibs,
+        version);
   }
 
   @Override
@@ -125,6 +128,7 @@ public final class JavaRuntimeInfo extends NativeInfo implements JavaRuntimeInfo
   @Nullable private final Artifact libModules;
   @Nullable private final Artifact defaultCDS;
   private final ImmutableList<CcInfo> hermeticStaticLibs;
+  private final int version;
 
   private JavaRuntimeInfo(
       NestedSet<Artifact> javaBaseInputs,
@@ -135,7 +139,8 @@ public final class JavaRuntimeInfo extends NativeInfo implements JavaRuntimeInfo
       NestedSet<Artifact> hermeticInputs,
       @Nullable Artifact libModules,
       @Nullable Artifact defaultCDS,
-      ImmutableList<CcInfo> hermeticStaticLibs) {
+      ImmutableList<CcInfo> hermeticStaticLibs,
+      int version) {
     this.javaBaseInputs = javaBaseInputs;
     this.javaHome = javaHome;
     this.javaBinaryExecPath = javaBinaryExecPath;
@@ -145,6 +150,7 @@ public final class JavaRuntimeInfo extends NativeInfo implements JavaRuntimeInfo
     this.libModules = libModules;
     this.defaultCDS = defaultCDS;
     this.hermeticStaticLibs = hermeticStaticLibs;
+    this.version = version;
   }
 
   /** All input artifacts in the javabase. */
@@ -214,7 +220,8 @@ public final class JavaRuntimeInfo extends NativeInfo implements JavaRuntimeInfo
     return hermeticStaticLibs;
   }
 
-  public NestedSet<LibraryToLink> collectHermeticStaticLibrariesToLink() {
+  @VisibleForTesting
+  NestedSet<LibraryToLink> collectHermeticStaticLibrariesToLink() {
     NestedSetBuilder<LibraryToLink> result = NestedSetBuilder.stableOrder();
     for (CcInfo lib : hermeticStaticLibs()) {
       result.addTransitive(lib.getCcLinkingContext().getLibraries());
@@ -230,6 +237,11 @@ public final class JavaRuntimeInfo extends NativeInfo implements JavaRuntimeInfo
   @Override
   public Depset starlarkJavaBaseInputs() {
     return Depset.of(Artifact.class, javaBaseInputs());
+  }
+
+  @Override
+  public int version() {
+    return version;
   }
 
   @Override

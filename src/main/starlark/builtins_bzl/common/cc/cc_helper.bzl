@@ -59,7 +59,7 @@ ios_cpus = struct(
     TVOS_SIMULATOR_TARGET_CPUS = ["tvos_x86_64", "tvos_sim_arm64"],
     TVOS_DEVICE_TARGET_CPUS = ["tvos_arm64"],
     CATALYST_TARGET_CPUS = ["catalyst_x86_64"],
-    MACOS_TARGET_CPUS = ["darwin_x86_64", "darwin_arm64", "darwin_arm64e", "darwin"],
+    MACOS_TARGET_CPUS = ["darwin_x86_64", "darwin_arm64", "darwin_arm64e"],
 )
 
 cpp_file_types = struct(
@@ -152,6 +152,7 @@ def _create_strip_action(ctx, cc_toolchain, cpp_config, input, output, feature_c
         outputs = [output],
         use_default_shell_env = True,
         executable = cc_common.get_tool_for_action(feature_configuration = feature_configuration, action_name = "strip"),
+        toolchain = cc_helper.CPP_TOOLCHAIN_TYPE,
         execution_requirements = execution_info,
         progress_message = "Stripping {} for {}".format(output.short_path, ctx.label),
         mnemonic = "CcStrip",
@@ -359,6 +360,7 @@ def _generate_def_file(ctx, def_parser, object_files, dll_name):
     ctx.actions.run(
         mnemonic = "DefParser",
         executable = def_parser,
+        toolchain = None,
         arguments = [args, argv],
         inputs = object_files,
         outputs = [def_file],
@@ -387,7 +389,7 @@ ARCHIVE = [".a", ".lib"]
 PIC_ARCHIVE = [".pic.a"]
 ALWAYSLINK_LIBRARY = [".lo"]
 ALWAYSLINK_PIC_LIBRARY = [".pic.lo"]
-SHARED_LIBRARY = [".so", ".dylib", ".dll"]
+SHARED_LIBRARY = [".so", ".dylib", ".dll", ".wasm"]
 INTERFACE_SHARED_LIBRARY = [".ifso", ".tbd", ".lib", ".dll.a"]
 OBJECT_FILE = [".o", ".obj"]
 PIC_OBJECT_FILE = [".pic.o"]
@@ -569,12 +571,13 @@ def _is_versioned_shared_library_extension_valid(shared_library_name):
 def _is_valid_shared_library_name(shared_library_name):
     if (shared_library_name.endswith(".so") or
         shared_library_name.endswith(".dll") or
-        shared_library_name.endswith(".dylib")):
+        shared_library_name.endswith(".dylib") or
+        shared_library_name.endswith(".wasm")):
         return True
 
     return _is_versioned_shared_library_extension_valid(shared_library_name)
 
-_SHARED_LIBRARY_EXTENSIONS = ["so", "dll", "dylib"]
+_SHARED_LIBRARY_EXTENSIONS = ["so", "dll", "dylib", "wasm"]
 
 def _is_valid_shared_library_artifact(shared_library):
     if (shared_library.extension in _SHARED_LIBRARY_EXTENSIONS):
@@ -1206,7 +1209,17 @@ def _copts_filter(ctx, additional_make_variable_substitutions):
     # Expand nocopts and create CoptsFilter.
     return _expand(ctx, nocopts, additional_make_variable_substitutions)
 
+def _proto_output_root(proto_root, genfiles_dir_path, bin_dir_path):
+    if proto_root == ".":
+        return bin_dir_path
+
+    if proto_root.startswith(genfiles_dir_path):
+        return bin_dir_path + "/" + proto_root[len(genfiles_dir_path):]
+    else:
+        return bin_dir_path + "/" + proto_root
+
 cc_helper = struct(
+    CPP_TOOLCHAIN_TYPE = _CPP_TOOLCHAIN_TYPE,
     merge_cc_debug_contexts = _merge_cc_debug_contexts,
     is_code_coverage_enabled = _is_code_coverage_enabled,
     get_dynamic_libraries_for_runtime = _get_dynamic_libraries_for_runtime,
@@ -1266,4 +1279,7 @@ cc_helper = struct(
     local_defines = _local_defines,
     linker_scripts = _linker_scripts,
     copts_filter = _copts_filter,
+    package_exec_path = _package_exec_path,
+    repository_exec_path = _repository_exec_path,
+    proto_output_root = _proto_output_root,
 )

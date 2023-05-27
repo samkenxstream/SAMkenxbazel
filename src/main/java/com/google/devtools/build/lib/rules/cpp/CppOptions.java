@@ -750,16 +750,6 @@ public class CppOptions extends FragmentOptions {
   public boolean inmemoryDotdFiles;
 
   @Option(
-      name = "experimental_parse_headers_skipped_if_corresponding_srcs_found",
-      defaultValue = "false",
-      documentationCategory = OptionDocumentationCategory.BUILD_TIME_OPTIMIZATION,
-      effectTags = {OptionEffectTag.LOADING_AND_ANALYSIS, OptionEffectTag.AFFECTS_OUTPUTS},
-      help =
-          "If enabled, the parse_headers feature does not create a separate header compile action "
-              + "if a source with the same basename is found in the same target.")
-  public boolean parseHeadersSkippedIfCorrespondingSrcsFound;
-
-  @Option(
       name = "experimental_omitfp",
       defaultValue = "false",
       documentationCategory = OptionDocumentationCategory.OUTPUT_PARAMETERS,
@@ -1062,13 +1052,11 @@ public class CppOptions extends FragmentOptions {
       name = "experimental_cpp_compile_argv_ignore_param_file",
       defaultValue = "true",
       documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
-      effectTags = {OptionEffectTag.BAZEL_INTERNAL_CONFIGURATION},
+      effectTags = {OptionEffectTag.NO_OP},
       metadataTags = {
         OptionMetadataTag.EXPERIMENTAL,
       },
-      help =
-          "If enabled, CppCompileAction action.argv returns the complete list of argv even if"
-              + " compiler_param_file is enabled.")
+      help = "This flag is a noop and scheduled for removal.")
   public boolean ignoreParamFile;
 
   @Option(
@@ -1176,6 +1164,18 @@ public class CppOptions extends FragmentOptions {
               + " toolchain() resolution to choose a test runner.")
   public boolean experimentalPlatformCcTest;
 
+  @Option(
+      name = "experimental_use_scheduling_middlemen",
+      defaultValue = "true",
+      documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
+      effectTags = {OptionEffectTag.LOADING_AND_ANALYSIS},
+      metadataTags = {OptionMetadataTag.INCOMPATIBLE_CHANGE},
+      help =
+          "Whether to use scheduling middlemen to depend on C++ compilation prerequisites. "
+              + "Scheduling middlemen are a legacy pre-Skyframe mechanism and this flag is a "
+              + "migration mechanism. This flag is not expected to cause any user-visible changes.")
+  public boolean useSchedulingMiddlemen;
+
   /** See {@link #targetLibcTopLabel} documentation. * */
   @Override
   public FragmentOptions getNormalized() {
@@ -1251,7 +1251,6 @@ public class CppOptions extends FragmentOptions {
     exec.disableNoCopts = disableNoCopts;
     exec.loadCcRulesFromBzl = loadCcRulesFromBzl;
     exec.validateTopLevelHeaderInclusions = validateTopLevelHeaderInclusions;
-    exec.parseHeadersSkippedIfCorrespondingSrcsFound = parseHeadersSkippedIfCorrespondingSrcsFound;
     exec.strictSystemIncludes = strictSystemIncludes;
     exec.useArgsParamsFile = useArgsParamsFile;
     exec.ignoreParamFile = ignoreParamFile;
@@ -1272,6 +1271,7 @@ public class CppOptions extends FragmentOptions {
     exec.hostLinkoptList = hostLinkoptList;
 
     exec.experimentalStarlarkCcImport = experimentalStarlarkCcImport;
+    exec.useSchedulingMiddlemen = useSchedulingMiddlemen;
 
     exec.macosSetInstallName = macosSetInstallName;
 

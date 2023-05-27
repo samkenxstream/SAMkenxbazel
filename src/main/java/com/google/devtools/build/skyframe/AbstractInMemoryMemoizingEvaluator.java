@@ -160,7 +160,7 @@ public abstract class AbstractInMemoryMemoizingEvaluator implements MemoizingEva
   }
 
   @Override
-  public void cleanupSkyKeyPool() {
-    getInMemoryGraph().cleanupPool();
+  public void cleanupInterningPools() {
+    getInMemoryGraph().cleanupInterningPool();
   }
 }

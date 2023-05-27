@@ -293,7 +293,8 @@ public final class ProfilerTest {
                     /* processId= */ 1,
                     /* mnemonic= */ "dummy1",
                     /* isMultiplex= */ true,
-                    /* isSandboxed= */ true),
+                    /* isSandboxed= */ true,
+                    /* workerKeyHash= */ 0),
                 WorkerMetric.WorkerStat.create(1024, Instant.now(), Instant.now()),
                 /* isMeasurable= */ true),
             WorkerMetric.create(
@@ -302,18 +303,10 @@ public final class ProfilerTest {
                     /* processId= */ 1,
                     /* mnemonic= */ "dummy2",
                     /* isMultiplex= */ false,
-                    /* isSandboxed= */ false),
+                    /* isSandboxed= */ false,
+                    /* workerKeyHash= */ 0),
                 WorkerMetric.WorkerStat.create(2048, Instant.now(), Instant.now()),
-                /* isMeasurable= */ true),
-            WorkerMetric.create(
-                WorkerMetric.WorkerProperties.create(
-                    /* workerIds= */ ImmutableList.of(1),
-                    /* processId= */ 1,
-                    /* mnemonic= */ "dummy2",
-                    /* isMultiplex= */ false,
-                    /* isSandboxed= */ false),
-                /* workerStat= */ null,
-                /* isMeasurable= */ false));
+                /* isMeasurable= */ true));
 
     WorkerMetricsCollector workerMetricsCollector = mock(WorkerMetricsCollector.class);
     when(workerMetricsCollector.collectMetrics()).thenReturn(workerMetrics);

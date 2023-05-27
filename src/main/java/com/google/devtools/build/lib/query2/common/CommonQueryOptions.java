@@ -41,7 +41,7 @@ public class CommonQueryOptions extends OptionsBase {
       help =
           "A comma-separated set of target patterns (additive and subtractive). The query may be"
               + " performed in the universe defined by the transitive closure of the specified"
-              + " targets. This option is used for the query and cquery commands. \n"
+              + " targets. This option is used for the query and cquery commands.\n"
               + "For cquery, the input to this option is the targets all answers are built under"
               + " and so this option may affect configurations and transitions. If this option is"
               + " not specified, the top-level targets are assumed to be the targets parsed from"
@@ -94,7 +94,7 @@ public class CommonQueryOptions extends OptionsBase {
               + " not be included in the dependency graph over which the query operates. An 'exec"
               + " configuration' dependency edge, such as the one from any 'proto_library' rule to"
               + " the Protocol Compiler, usually points to a tool executed during the build rather"
-              + " than a part of the same 'target' program. \n"
+              + " than a part of the same 'target' program.\n"
               + "Cquery: If disabled, filters out all configured targets which cross an"
               + " execution transition from the top-level target that discovered this configured"
               + " target. That means if the top-level target is in the target configuration, only"
@@ -275,6 +275,16 @@ public class CommonQueryOptions extends OptionsBase {
           "Populate the definition_stack proto field, which records for each rule instance the "
               + "Starlark call stack at the moment the rule's class was defined.")
   public boolean protoIncludeDefinitionStack;
+
+  @Option(
+      name = "proto:include_attribute_source_aspects",
+      defaultValue = "false",
+      documentationCategory = OptionDocumentationCategory.QUERY,
+      effectTags = {OptionEffectTag.TERMINAL_OUTPUT},
+      help =
+          "Populate the source_aspect_name proto field of each Attribute with the source aspect "
+              + "that the attribute came from (empty string if it did not).")
+  public boolean protoIncludeAttributeSourceAspects;
 
   /** An enum converter for {@code AspectResolver.Mode} . Should be used internally only. */
   public static class AspectResolutionModeConverter extends EnumConverter<Mode> {

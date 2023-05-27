@@ -147,13 +147,11 @@ _common_attrs = {
             "This attribute is an absolute label (use '@//' for the main " +
             "repo). The file does not need to be named BUILD, but can " +
             "be (something like BUILD.new-repo-name may work well for " +
-            "distinguishing it from the repository's actual BUILD files. " +
-            "Either build_file or build_file_content must be specified.",
+            "distinguishing it from the repository's actual BUILD files. ",
     ),
     "build_file_content": attr.string(
         doc =
-            "The content for the BUILD file for this repository. " +
-            "Either build_file or build_file_content must be specified.",
+            "The content for the BUILD file for this repository. ",
     ),
     "workspace_file": attr.label(
         doc =
@@ -175,7 +173,10 @@ def _git_repository_implementation(ctx):
     update = _clone_or_update_repo(ctx)
     workspace_and_buildfile(ctx)
     patch(ctx)
-    ctx.delete(ctx.path(".git"))
+    if ctx.attr.strip_prefix:
+        ctx.delete(ctx.path(".tmp_git_root/.git"))
+    else:
+        ctx.delete(ctx.path(".git"))
     return _update_git_attrs(ctx.attr, _common_attrs.keys(), update)
 
 git_repository = repository_rule(
@@ -192,6 +193,17 @@ is).
 Bazel will first try to perform a shallow fetch of only the specified commit.
 If that fails (usually due to missing server support), it will fall back to a
 full fetch of the repository.
+
+Prefer [`http_archive`](/rules/lib/repo/http#http_archive) to `git_repository`.
+The reasons are:
+
+* Git repository rules depend on system `git(1)` whereas the HTTP downloader is built
+  into Bazel and has no system dependencies.
+* `http_archive` supports a list of `urls` as mirrors, and `git_repository` supports only
+  a single `remote`.
+* `http_archive` works with the [repository cache](/run/build#repository-cache), but not
+  `git_repository`. See
+   [#5116](https://github.com/bazelbuild/bazel/issues/5116){: .external} for more information.
 """,
 )
 

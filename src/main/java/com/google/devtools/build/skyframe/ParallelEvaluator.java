@@ -20,7 +20,6 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.flogger.GoogleLogger;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
-import com.google.devtools.build.lib.collect.nestedset.NestedSetVisitor;
 import com.google.devtools.build.lib.concurrent.QuiescingExecutor;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadCompatible;
 import com.google.devtools.build.lib.events.ExtendedEventHandler;
@@ -28,6 +27,7 @@ import com.google.devtools.build.lib.events.Reportable;
 import com.google.devtools.build.lib.profiler.Profiler;
 import com.google.devtools.build.lib.profiler.ProfilerTask;
 import com.google.devtools.build.lib.profiler.SilentCloseable;
+import com.google.devtools.build.skyframe.Differencer.DiffWithDelta.Delta;
 import com.google.devtools.build.skyframe.EvaluationContext.UnnecessaryTemporaryStateDropperReceiver;
 import com.google.devtools.build.skyframe.EvaluationProgressReceiver.EvaluationState;
 import com.google.devtools.build.skyframe.EvaluationProgressReceiver.EvaluationSuccessState;
@@ -62,7 +62,7 @@ public class ParallelEvaluator extends AbstractParallelEvaluator {
       Version minimalVersion,
       ImmutableMap<SkyFunctionName, SkyFunction> skyFunctions,
       ExtendedEventHandler reporter,
-      NestedSetVisitor.VisitedState emittedEventState,
+      EmittedEventState emittedEventState,
       EventFilter storedEventFilter,
       ErrorInfoManager errorInfoManager,
       boolean keepGoing,
@@ -128,7 +128,8 @@ public class ParallelEvaluator extends AbstractParallelEvaluator {
             value != null
                 ? EvaluationSuccessState.SUCCESS.supplier()
                 : EvaluationSuccessState.FAILURE.supplier(),
-            evaluationState);
+            evaluationState,
+            /* directDeps= */ null);
   }
 
   @ThreadCompatible
@@ -188,7 +189,7 @@ public class ParallelEvaluator extends AbstractParallelEvaluator {
             .get(ErrorTransienceValue.KEY);
     if (!errorTransienceEntry.isDone()) {
       injectValues(
-          ImmutableMap.of(ErrorTransienceValue.KEY, ErrorTransienceValue.INSTANCE),
+          ImmutableMap.of(ErrorTransienceValue.KEY, Delta.justNew(ErrorTransienceValue.INSTANCE)),
           evaluatorContext.getGraphVersion(),
           graph,
           evaluatorContext.getProgressReceiver());
@@ -581,16 +582,16 @@ public class ParallelEvaluator extends AbstractParallelEvaluator {
   }
 
   static void injectValues(
-      Map<SkyKey, SkyValue> injectionMap,
+      Map<SkyKey, Delta> injectionMap,
       Version version,
       ProcessableGraph graph,
       DirtyTrackingProgressReceiver progressReceiver)
       throws InterruptedException {
     NodeBatch prevNodeEntries =
         graph.createIfAbsentBatch(null, Reason.OTHER, injectionMap.keySet());
-    for (Map.Entry<SkyKey, SkyValue> injectionEntry : injectionMap.entrySet()) {
+    for (Map.Entry<SkyKey, Delta> injectionEntry : injectionMap.entrySet()) {
       SkyKey key = injectionEntry.getKey();
-      SkyValue value = injectionEntry.getValue();
+      SkyValue value = injectionEntry.getValue().newValue();
       NodeEntry prevEntry = prevNodeEntries.get(key);
       DependencyState newState = prevEntry.addReverseDepAndCheckIfDone(null);
       Preconditions.checkState(
@@ -608,7 +609,10 @@ public class ParallelEvaluator extends AbstractParallelEvaluator {
             prevEntry.noDepsLastBuild(), "existing entry for %s has deps: %s", key, prevEntry);
       }
       prevEntry.markRebuilding();
-      prevEntry.setValue(value, version, /*maxTransitiveSourceVersion=*/ null);
+      @Nullable
+      Version maxTransitiveSourceVersion =
+          injectionEntry.getValue().newMaxTransitiveSourceVersion();
+      prevEntry.setValue(value, version, maxTransitiveSourceVersion);
       // Now that this key's injected value is set, it is no longer dirty.
       progressReceiver.injected(key);
     }

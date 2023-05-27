@@ -23,9 +23,8 @@ import com.google.devtools.build.lib.actions.ActionContext;
 import com.google.devtools.build.lib.actions.ActionInput;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.Artifact.ArtifactExpander;
-import com.google.devtools.build.lib.actions.MetadataProvider;
+import com.google.devtools.build.lib.actions.InputMetadataProvider;
 import com.google.devtools.build.lib.actions.Spawn;
-import com.google.devtools.build.lib.actions.cache.MetadataInjector;
 import com.google.devtools.build.lib.exec.SpawnInputExpander;
 import com.google.devtools.build.lib.exec.SpawnRunner.ProgressStatus;
 import com.google.devtools.build.lib.exec.SpawnRunner.SpawnExecutionContext;
@@ -106,8 +105,8 @@ public final class SpawnRunnerTestUtil {
     }
 
     @Override
-    public MetadataProvider getMetadataProvider() {
-      return mock(MetadataProvider.class);
+    public InputMetadataProvider getInputMetadataProvider() {
+      return mock(InputMetadataProvider.class);
     }
 
     @Override
@@ -143,11 +142,6 @@ public final class SpawnRunnerTestUtil {
     @Override
     public void report(ProgressStatus progress) {
       reportedStatus.add(progress);
-    }
-
-    @Override
-    public MetadataInjector getMetadataInjector() {
-      return mock(MetadataInjector.class);
     }
 
     @Override

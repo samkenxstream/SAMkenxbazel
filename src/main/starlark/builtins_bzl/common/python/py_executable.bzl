@@ -17,6 +17,7 @@ load(":common/cc/cc_helper.bzl", "cc_helper")
 load(
     ":common/python/common.bzl",
     "TOOLCHAIN_TYPE",
+    "check_native_allowed",
     "collect_imports",
     "collect_runfiles",
     "create_instrumented_files_info",
@@ -37,10 +38,12 @@ load(
 )
 load(
     ":common/python/providers.bzl",
+    "PyCcLinkParamsProvider",
     "PyRuntimeInfo",
 )
 load(
     ":common/python/semantics.bzl",
+    "ALLOWED_MAIN_EXTENSIONS",
     "BUILD_DATA_SYMLINK_PATH",
     "IS_BAZEL",
     "PY_RUNTIME_ATTR_NAME",
@@ -184,6 +187,7 @@ def py_executable_base_impl(ctx, *, semantics, is_test, inherited_environment = 
 def _validate_executable(ctx):
     if ctx.attr.python_version != "PY3":
         fail("It is not allowed to use Python 2")
+    check_native_allowed(ctx)
 
 def _compute_outputs(ctx, output_sources):
     # TODO: This should use the configuration instead of the Bazel OS.
@@ -210,19 +214,13 @@ def _get_runtime_details(ctx, semantics):
         A struct; see inline-field comments of the return value for details.
     """
 
-    # NOTE: Both Bazel and Google have similar legacy "path to a python
-    # interpreter" flags with similar functions, but with subtle differences.
-    #
     # Bazel has --python_path. This flag has a computed default of "python" when
     # its actual default is null (see
     # BazelPythonConfiguration.java#getPythonPath). This flag is only used if
-    # toolchains are not enabled and `--python_top` isn't set.
+    # toolchains are not enabled and `--python_top` isn't set. Note that Google
+    # used to have a variant of this named --python_binary, but it has since
+    # been removed.
     #
-    # Google has --python_binary. This flag defaults to null; no special
-    # computed behavior. If set, it is used instead of any runtime or toolchain.
-    # This is a legacy behavior, but not fully cleaned up yet.
-    #
-    # TODO(b/230428071): Remove this once Google's --python_binary flag is removed.
     # TOOD(bazelbuild/bazel#7901): Remove this once --python_path flag is removed.
 
     if IS_BAZEL:
@@ -293,25 +291,21 @@ def _maybe_get_runtime_from_ctx(ctx):
     if ctx.fragments.py.use_toolchains:
         toolchain = ctx.toolchains[TOOLCHAIN_TYPE]
 
+        if not hasattr(toolchain, "py3_runtime"):
+            fail("Python toolchain field 'py3_runtime' is missing")
+        if not toolchain.py3_runtime:
+            fail("Python toolchain missing py3_runtime")
+        py3_runtime = toolchain.py3_runtime
+
         # Hack around the fact that the autodetecting Python toolchain, which is
         # automatically registered, does not yet support Windows. In this case,
         # we want to return null so that _get_interpreter_path falls back on
         # --python_path. See tools/python/toolchain.bzl.
         # TODO(#7844): Remove this hack when the autodetecting toolchain has a
         # Windows implementation.
-        if (
-            # BazelPyBinaryConfiguredTargetTest.toolchainInfoFieldHasBadVersion purposefully
-            # omits the py2_runtime attribute to test for other error messages.
-            hasattr(toolchain, "py2_runtime") and toolchain.py2_runtime and
-            toolchain.py2_runtime.interpreter_path == "/_magic_pyruntime_sentinel_do_not_use"
-        ):
+        if py3_runtime.interpreter_path == "/_magic_pyruntime_sentinel_do_not_use":
             return None, None
 
-        if not hasattr(toolchain, "py3_runtime"):
-            fail("Python toolchain field 'py3_runtime' is missing")
-        if not toolchain.py3_runtime:
-            fail("Python toolchain missing py3_runtime")
-        py3_runtime = toolchain.py3_runtime
         if py3_runtime.python_version != "PY3":
             fail("Python toolchain py3_runtime must be python_version=PY3, got {}".format(
                 py3_runtime.python_version,
@@ -622,7 +616,7 @@ def determine_main(ctx):
     """
     if ctx.attr.main:
         proposed_main = ctx.attr.main.label.name
-        if not proposed_main.endswith(".py"):
+        if not proposed_main.endswith(tuple(ALLOWED_MAIN_EXTENSIONS)):
             fail("main must end in '.py'")
     else:
         if ctx.label.name.endswith(".py"):
@@ -755,7 +749,7 @@ def _create_providers(
     # are cleaned up.
     if cc_info:
         providers.append(
-            _py_builtins.new_py_cc_link_params_provider(cc_info = cc_info),
+            PyCcLinkParamsProvider(cc_info = cc_info),
         )
 
     py_info, deps_transitive_sources = create_py_info(

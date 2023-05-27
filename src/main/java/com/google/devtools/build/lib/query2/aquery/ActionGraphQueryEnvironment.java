@@ -144,7 +144,6 @@ public class ActionGraphQueryEnvironment
             eventHandler,
             aqueryOptions,
             out,
-            skyframeExecutor,
             accessor,
             StreamedOutputHandler.OutputType.BINARY,
             actionFilters),
@@ -152,7 +151,6 @@ public class ActionGraphQueryEnvironment
             eventHandler,
             aqueryOptions,
             out,
-            skyframeExecutor,
             accessor,
             StreamedOutputHandler.OutputType.TEXT,
             actionFilters),
@@ -160,20 +158,13 @@ public class ActionGraphQueryEnvironment
             eventHandler,
             aqueryOptions,
             out,
-            skyframeExecutor,
             accessor,
             StreamedOutputHandler.OutputType.JSON,
             actionFilters),
         new ActionGraphTextOutputFormatterCallback(
-            eventHandler,
-            aqueryOptions,
-            out,
-            skyframeExecutor,
-            accessor,
-            actionFilters,
-            getMainRepoMapping()),
+            eventHandler, aqueryOptions, out, accessor, actionFilters, getMainRepoMapping()),
         new ActionGraphSummaryOutputFormatterCallback(
-            eventHandler, aqueryOptions, out, skyframeExecutor, accessor, actionFilters));
+            eventHandler, aqueryOptions, out, accessor, actionFilters));
   }
 
   @Override
@@ -197,7 +188,7 @@ public class ActionGraphQueryEnvironment
   @Nullable
   private KeyedConfiguredTargetValue createKeyedConfiguredTargetValueFromKey(
       ConfiguredTargetKey key) throws InterruptedException {
-    ConfiguredTargetValue configuredTargetValue = getConfiguredTargetValue(key);
+    ConfiguredTargetValue configuredTargetValue = getConfiguredTargetValue(key.toKey());
     return configuredTargetValue == null
         ? null
         : KeyedConfiguredTargetValue.create(configuredTargetValue, key);
@@ -271,7 +262,8 @@ public class ActionGraphQueryEnvironment
   }
 
   @Override
-  protected ConfiguredTargetKey getSkyKey(KeyedConfiguredTargetValue keyedConfiguredTargetValue) {
+  protected ConfiguredTargetKey getConfiguredTargetKey(
+      KeyedConfiguredTargetValue keyedConfiguredTargetValue) {
     return keyedConfiguredTargetValue.getConfiguredTargetKey();
   }
 

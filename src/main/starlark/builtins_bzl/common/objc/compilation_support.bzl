@@ -40,13 +40,14 @@ def _build_common_variables(
         use_pch = False,
         empty_compilation_artifacts = False,
         deps = [],
-        runtime_deps = [],
+        implementation_deps = [],
         extra_disabled_features = [],
         extra_enabled_features = [],
         extra_import_libraries = [],
         attr_linkopts = [],
         alwayslink = False,
-        has_module_map = False):
+        has_module_map = False,
+        direct_cc_compilation_contexts = []):
     compilation_attributes = objc_internal.create_compilation_attributes(ctx = ctx)
     intermediate_artifacts = objc_internal.create_intermediate_artifacts(ctx = ctx)
     if empty_compilation_artifacts:
@@ -63,12 +64,13 @@ def _build_common_variables(
         compilation_attributes = compilation_attributes,
         compilation_artifacts = compilation_artifacts,
         deps = deps,
-        runtime_deps = runtime_deps,
+        implementation_deps = implementation_deps,
         intermediate_artifacts = intermediate_artifacts,
         alwayslink = alwayslink,
         has_module_map = has_module_map,
         extra_import_libraries = extra_import_libraries,
         attr_linkopts = attr_linkopts,
+        direct_cc_compilation_contexts = direct_cc_compilation_contexts,
     )
 
     return struct(
@@ -162,6 +164,7 @@ def _compile(
         system_includes = objc_compilation_context.system_includes,
         quote_includes = objc_compilation_context.quote_includes,
         compilation_contexts = objc_compilation_context.cc_compilation_contexts,
+        implementation_compilation_contexts = objc_compilation_context.implementation_cc_compilation_contexts,
         user_compile_flags = user_compile_flags,
         grep_includes = _get_grep_includes(common_variables.ctx),
         module_map = module_map,
@@ -251,7 +254,7 @@ def _register_compile_and_archive_actions_for_j2objc(
         objc_compilation_context = objc_compilation_context,
         objc_linking_context = objc_linking_context,
         toolchain = toolchain,
-        alwayslink = False,
+        alwayslink = True,
         use_pch = False,
         objc_config = ctx.fragments.objc,
         objc_provider = None,

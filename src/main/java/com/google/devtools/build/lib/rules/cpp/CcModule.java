@@ -140,12 +140,15 @@ public abstract class CcModule
       ImmutableList.of("executable", "dynamic_library", "archive");
 
   private static final ImmutableList<PackageIdentifier> PRIVATE_STARLARKIFICATION_ALLOWLIST =
+      // Repo names in the allowlist are non canonical repo names and package names are package
+      // prefixes under which we allow restricted API usage.
       ImmutableList.of(
           PackageIdentifier.createUnchecked("_builtins", ""),
           PackageIdentifier.createInMainRepo("bazel_internal/test_rules/cc"),
           PackageIdentifier.createInMainRepo("tools/build_defs/android"),
           PackageIdentifier.createInMainRepo("third_party/bazel_rules/rules_android"),
           PackageIdentifier.createUnchecked("build_bazel_rules_android", ""),
+          PackageIdentifier.createUnchecked("rules_android", ""),
           PackageIdentifier.createInMainRepo("rust/private"),
           PackageIdentifier.createUnchecked("rules_rust", "rust/private"));
 
@@ -788,15 +791,6 @@ public abstract class CcModule
   }
 
   @Override
-  public CcInfo mergeCcInfos(Sequence<?> directCcInfos, Sequence<?> ccInfos, StarlarkThread thread)
-      throws EvalException {
-    isCalledFromStarlarkCcCommon(thread);
-    return CcInfo.merge(
-        Sequence.cast(directCcInfos, CcInfo.class, "directs"),
-        Sequence.cast(ccInfos, CcInfo.class, "cc_infos"));
-  }
-
-  @Override
   public CcCompilationContext createCcCompilationContext(
       Object headers,
       Object systemIncludes,
@@ -809,6 +803,7 @@ public abstract class CcModule
       Sequence<?> directPublicHdrs,
       Sequence<?> directPrivateHdrs,
       Object purposeNoneable,
+      Object moduleMap,
       StarlarkThread thread)
       throws EvalException {
     isCalledFromStarlarkCcCommon(thread);
@@ -853,6 +848,9 @@ public abstract class CcModule
         && purposeNoneable != Starlark.NONE) {
       ccCompilationContext.setPurpose((String) purposeNoneable);
     }
+    if (moduleMap != null && moduleMap != Starlark.UNBOUND && moduleMap != Starlark.NONE) {
+      ccCompilationContext.setCppModuleMap((CppModuleMap) moduleMap);
+    }
 
     return ccCompilationContext.build();
   }
@@ -873,13 +871,19 @@ public abstract class CcModule
 
   @Override
   public CcCompilationContext mergeCompilationContexts(
-      Sequence<?> compilationContexts, StarlarkThread thread) throws EvalException {
+      Sequence<?> compilationContexts,
+      Sequence<?> nonExportedCompilationContexts,
+      StarlarkThread thread)
+      throws EvalException {
     isCalledFromStarlarkCcCommon(thread);
     return CcCompilationContext.builder(
             /* actionConstructionContext= */ null, /* configuration= */ null, /* label= */ null)
         .addDependentCcCompilationContexts(
             Sequence.cast(compilationContexts, CcCompilationContext.class, "compilation_contexts"),
-            ImmutableList.of())
+            Sequence.cast(
+                nonExportedCompilationContexts,
+                CcCompilationContext.class,
+                "non_exported_compilation_contexts"))
         .build();
   }
 
@@ -1910,7 +1914,6 @@ public abstract class CcModule
                 TargetUtils.getExecutionInfo(
                     actions.getRuleContext().getRule(),
                     actions.getRuleContext().isAllowTagsPropagation()))
-            .setGrepIncludes(convertFromNoneable(grepIncludes, /* defaultValue= */ null))
             .addNonCodeLinkerInputs(
                 Sequence.cast(additionalInputs, Artifact.class, "additional_inputs"))
             .setShouldCreateStaticLibraries(!disallowStaticLibraries)
@@ -1967,23 +1970,31 @@ public abstract class CcModule
   }
 
   private static void checkPrivateStarlarkificationAllowlistByLabel(
-      Label label, ImmutableList<PackageIdentifier> privateStarlarkificationAllowlist)
+      BazelModuleContext bazelModuleContext,
+      Label label,
+      ImmutableList<PackageIdentifier> privateStarlarkificationAllowlist)
       throws EvalException {
     if (privateStarlarkificationAllowlist.stream()
         .noneMatch(
             allowedPrefix ->
-                label.getRepository().equals(allowedPrefix.getRepository())
+                label
+                        .getRepository()
+                        .equals(
+                            bazelModuleContext
+                                .repoMapping()
+                                .get(allowedPrefix.getRepository().getName()))
                     && label.getPackageFragment().startsWith(allowedPrefix.getPackageFragment()))) {
-      throw Starlark.errorf("Rule in '%s' cannot use private API", label.getPackageName());
+      throw Starlark.errorf("Rule in '%s' cannot use private API", label);
     }
   }
 
   public static void checkPrivateStarlarkificationAllowlist(StarlarkThread thread)
       throws EvalException {
-    Label label =
-        ((BazelModuleContext) Module.ofInnermostEnclosingStarlarkFunction(thread).getClientData())
-            .label();
-    checkPrivateStarlarkificationAllowlistByLabel(label, PRIVATE_STARLARKIFICATION_ALLOWLIST);
+    BazelModuleContext bazelModuleContext =
+        (BazelModuleContext) Module.ofInnermostEnclosingStarlarkFunction(thread).getClientData();
+    Label label = bazelModuleContext.label();
+    checkPrivateStarlarkificationAllowlistByLabel(
+        bazelModuleContext, label, PRIVATE_STARLARKIFICATION_ALLOWLIST);
   }
 
   public static boolean isBuiltIn(StarlarkThread thread) {
@@ -2029,15 +2040,14 @@ public abstract class CcModule
   public void checkPrivateApi(Object allowlistObject, StarlarkThread thread) throws EvalException {
     // Make sure that check_private_api is called either from builtins or allowlisted packages.
     isCalledFromStarlarkCcCommon(thread);
-    Label label =
-        ((BazelModuleContext)
-                Module.ofInnermostEnclosingStarlarkFunction(thread, 1).getClientData())
-            .label();
+    BazelModuleContext bazelModuleContext =
+        (BazelModuleContext) Module.ofInnermostEnclosingStarlarkFunction(thread, 1).getClientData();
+    Label label = bazelModuleContext.label();
     ImmutableList<PackageIdentifier> allowlist =
         Sequence.cast(allowlistObject, Tuple.class, "allowlist").stream()
             .map(p -> PackageIdentifier.createUnchecked((String) p.get(0), (String) p.get(1)))
             .collect(ImmutableList.toImmutableList());
-    checkPrivateStarlarkificationAllowlistByLabel(label, allowlist);
+    checkPrivateStarlarkificationAllowlistByLabel(bazelModuleContext, label, allowlist);
   }
 
   protected Language parseLanguage(String string) throws EvalException {
@@ -2351,7 +2361,9 @@ public abstract class CcModule
             name = "grep_includes",
             positional = false,
             named = true,
-            documented = false,
+            doc =
+                "DO NOT USE - DEPRECATED. grep_includes is now part of cc_toolchain and there is no"
+                    + " need to specify it from the rule itself.",
             defaultValue = "None",
             allowedTypes = {
               @ParamType(type = FileApi.class),
@@ -2422,7 +2434,6 @@ public abstract class CcModule
       StarlarkThread thread)
       throws EvalException, InterruptedException {
     isCalledFromStarlarkCcCommon(thread);
-    Artifact grepIncludes = convertFromNoneable(grepIncludesObject, /* defaultValue= */ null);
     getSemantics()
         .validateStarlarkCompileApiCall(
             starlarkActionFactoryApi,
@@ -2508,7 +2519,6 @@ public abstract class CcModule
             actions.asActionRegistry(actions),
             actions.getActionConstructionContext(),
             label,
-            grepIncludes,
             getSemantics(language),
             featureConfiguration.getFeatureConfiguration(),
             sourceCategory,
@@ -2753,7 +2763,6 @@ public abstract class CcModule
                 TargetUtils.getExecutionInfo(
                     actions.getRuleContext().getRule(),
                     actions.getRuleContext().isAllowTagsPropagation()))
-            .setGrepIncludes(convertFromNoneable(grepIncludes, /* defaultValue= */ null))
             .setLinkingMode(linkDepsStatically ? LinkingMode.STATIC : LinkingMode.DYNAMIC)
             .setIsStampingEnabled(isStampingEnabled)
             .addTransitiveAdditionalLinkerInputs(additionalInputsSet)
@@ -2877,7 +2886,14 @@ public abstract class CcModule
             doc = "<code>feature_configuration</code> to be queried.",
             positional = false,
             named = true),
-        @Param(name = "grep_includes", documented = false, positional = false, named = true),
+        @Param(
+            name = "grep_includes",
+            doc =
+                "DO NOT USE - DEPRECATED. grep_includes is now part of cc_toolchain and there is no"
+                    + " need to specify it from the rule itself.",
+            positional = false,
+            named = true,
+            defaultValue = "None"),
         @Param(name = "source_file", documented = false, positional = false, named = true),
         @Param(name = "output_file", documented = false, positional = false, named = true),
         @Param(name = "compilation_inputs", documented = false, positional = false, named = true),
@@ -2893,7 +2909,7 @@ public abstract class CcModule
       StarlarkActionFactory starlarkActionFactoryApi,
       CcToolchainProvider ccToolchain,
       FeatureConfigurationForStarlark featureConfigurationForStarlark,
-      Artifact grepIncludes,
+      Object grepIncludes,
       Artifact sourceFile,
       Artifact outputFile,
       Depset compilationInputs,
@@ -2912,7 +2928,6 @@ public abstract class CcModule
             CppLinkstampCompileHelper.createLinkstampCompileAction(
                 ruleContext,
                 ruleContext,
-                grepIncludes,
                 ruleContext.getConfiguration(),
                 sourceFile,
                 outputFile,

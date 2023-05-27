@@ -57,6 +57,7 @@ import com.google.devtools.build.lib.rules.java.JavaConfiguration;
 import com.google.devtools.build.lib.rules.java.JavaConfiguration.OneVersionEnforcementLevel;
 import com.google.devtools.build.lib.rules.java.JavaHelper;
 import com.google.devtools.build.lib.rules.java.JavaRuleOutputJarsProvider;
+import com.google.devtools.build.lib.rules.java.JavaRuntimeInfo;
 import com.google.devtools.build.lib.rules.java.JavaSemantics;
 import com.google.devtools.build.lib.rules.java.JavaSourceJarsProvider;
 import com.google.devtools.build.lib.rules.java.JavaTargetAttributes;
@@ -86,9 +87,6 @@ public class BazelJavaSemantics implements JavaSemantics {
   private static final Template STUB_SCRIPT =
       Template.forResource(BazelJavaSemantics.class, "java_stub_template.txt");
   private static final String CLASSPATH_PLACEHOLDER = "%classpath%";
-
-  private static final String JAVABUILDER_CLASS_NAME =
-      "com.google.devtools.build.buildjar.BazelJavaBuilder";
 
   private static final String JACOCO_COVERAGE_RUNNER_MAIN_CLASS =
       "com.google.testing.coverage.JacocoCoverageRunner";
@@ -249,26 +247,6 @@ public class BazelJavaSemantics implements JavaSemantics {
   @Override
   public boolean isJavaExecutableSubstitution() {
     return false;
-  }
-
-  @Override
-  public Artifact createStubAction(
-      RuleContext ruleContext,
-      JavaCommon javaCommon,
-      List<String> jvmFlags,
-      Artifact executable,
-      String javaStartClass,
-      String javaExecutable) {
-    return createStubAction(
-        ruleContext,
-        javaCommon,
-        jvmFlags,
-        executable,
-        javaStartClass,
-        "",
-        NestedSetBuilder.<Artifact>stableOrder(),
-        javaExecutable,
-        /* createCoverageMetadataJar= */ true);
   }
 
   @Override
@@ -548,6 +526,9 @@ public class BazelJavaSemantics implements JavaSemantics {
         if (testClass == null) {
           ruleContext.ruleError("cannot determine test class");
         } else {
+          if (JavaRuntimeInfo.from(ruleContext).version() >= 17) {
+            jvmFlags.add("-Djava.security.manager=allow");
+          }
           // Always run junit tests with -ea (enable assertion)
           jvmFlags.add("-ea");
           // "suite" is a misnomer.
@@ -674,12 +655,6 @@ public class BazelJavaSemantics implements JavaSemantics {
     }
     return ImmutableList.<String>of();
   }
-
-  @Override
-  public String getJavaBuilderMainClass() {
-    return JAVABUILDER_CLASS_NAME;
-  }
-
   @Override
   public Artifact getProtoMapping(RuleContext ruleContext) throws InterruptedException {
     return null;

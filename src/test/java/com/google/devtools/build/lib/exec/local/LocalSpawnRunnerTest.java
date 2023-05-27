@@ -36,15 +36,14 @@ import com.google.devtools.build.lib.actions.ActionInput;
 import com.google.devtools.build.lib.actions.Artifact.ArtifactExpander;
 import com.google.devtools.build.lib.actions.CommandLines.ParamFileActionInput;
 import com.google.devtools.build.lib.actions.ExecutionRequirements;
+import com.google.devtools.build.lib.actions.InputMetadataProvider;
 import com.google.devtools.build.lib.actions.LocalHostCapacity;
-import com.google.devtools.build.lib.actions.MetadataProvider;
 import com.google.devtools.build.lib.actions.ParameterFile.ParameterFileType;
 import com.google.devtools.build.lib.actions.ResourceManager;
 import com.google.devtools.build.lib.actions.ResourceSet;
 import com.google.devtools.build.lib.actions.Spawn;
 import com.google.devtools.build.lib.actions.SpawnResult;
 import com.google.devtools.build.lib.actions.SpawnResult.Status;
-import com.google.devtools.build.lib.actions.cache.MetadataInjector;
 import com.google.devtools.build.lib.actions.cache.VirtualActionInput;
 import com.google.devtools.build.lib.actions.util.ActionsTestUtil;
 import com.google.devtools.build.lib.exec.BinTools;
@@ -258,7 +257,7 @@ public class LocalSpawnRunnerTest {
     }
 
     @Override
-    public MetadataProvider getMetadataProvider() {
+    public InputMetadataProvider getInputMetadataProvider() {
       return mockFileCache;
     }
 
@@ -294,11 +293,6 @@ public class LocalSpawnRunnerTest {
     }
 
     @Override
-    public MetadataInjector getMetadataInjector() {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
     public boolean isRewindingEnabled() {
       return false;
     }
@@ -318,7 +312,7 @@ public class LocalSpawnRunnerTest {
     }
   }
 
-  private final MetadataProvider mockFileCache = mock(MetadataProvider.class);
+  private final InputMetadataProvider mockFileCache = mock(InputMetadataProvider.class);
   private final ResourceManager resourceManager = ResourceManager.instanceForTestingOnly();
 
   private Logger logger;

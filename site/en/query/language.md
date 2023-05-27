@@ -495,7 +495,7 @@ The query language defines several functions. The name of the function
 determines the number and type of arguments it requires. The following
 functions are available:
 
-* [`allpaths`](#path-operators)
+* [`allpaths`](#somepath-allpaths)
 * [`attr`](#attr)
 * [`buildfiles`](#buildfiles)
 * [`rbuildfiles`](#rbuildfiles)
@@ -509,7 +509,7 @@ functions are available:
 * [`same_pkg_direct_rdeps`](#same_pkg_direct_rdeps)
 * [`siblings`](#siblings)
 * [`some`](#some)
-* [`somepath`](#path-operators)
+* [`somepath`](#somepath-allpaths)
 * [`tests`](#tests)
 * [`visible`](#visible)
 
@@ -590,7 +590,7 @@ equivalent to `rdeps(//foo/..., //bar)`.
 expr ::= same_pkg_direct_rdeps({{ '<var>' }}expr{{ '</var>' }})
 ```
 
-The `same_pkg_direct_rdeps({{ '<var>' }}x{{ '</var>' }})` operator evalutes to the full set of targets
+The `same_pkg_direct_rdeps({{ '<var>' }}x{{ '</var>' }})` operator evaluates to the full set of targets
 that are in the same package as a target in the argument set, and which directly depend on it.
 
 ### Dealing with a target's package: siblings {:#siblings}
@@ -599,7 +599,7 @@ that are in the same package as a target in the argument set, and which directly
 expr ::= siblings({{ '<var>' }}expr{{ '</var>' }})
 ```
 
-The `siblings({{ '<var>' }}x{{ '</var>' }})` operator evalutes to the full set of targets that are in
+The `siblings({{ '<var>' }}x{{ '</var>' }})` operator evaluates to the full set of targets that are in
 the same package as a target in the argument set.
 
 ### Arbitrary choice: some {:#some}

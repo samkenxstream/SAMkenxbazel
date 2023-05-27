@@ -42,6 +42,7 @@ import com.google.devtools.build.lib.actions.ArtifactRoot;
 import com.google.devtools.build.lib.actions.ArtifactRoot.RootType;
 import com.google.devtools.build.lib.actions.FileArtifactValue;
 import com.google.devtools.build.lib.actions.FileArtifactValue.RemoteFileArtifactValue;
+import com.google.devtools.build.lib.actions.StaticInputMetadataProvider;
 import com.google.devtools.build.lib.actions.util.ActionsTestUtil;
 import com.google.devtools.build.lib.authandtls.CallCredentialsProvider;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent.LocalFile;
@@ -333,7 +334,7 @@ public class ByteStreamBuildEventArtifactUploaderTest {
 
     assertThat(eventHandler.getEvents()).isNotEmpty();
     assertThat(eventHandler.getEvents().get(0).getMessage())
-        .contains("Uploading BEP referenced local files: ");
+        .contains("Uploading BEP referenced local file /file");
 
     artifactUploader.release();
 
@@ -365,6 +366,7 @@ public class ByteStreamBuildEventArtifactUploaderTest {
             outputRoot.getRoot().asPath().relativeTo(execRoot).getPathString(),
             outputs,
             ImmutableList.of(artifact),
+            StaticInputMetadataProvider.empty(),
             actionInputFetcher);
     Path remotePath = remoteFs.getPath(artifact.getPath().getPathString());
     assertThat(remotePath.getFileSystem()).isEqualTo(remoteFs);
@@ -376,7 +378,7 @@ public class ByteStreamBuildEventArtifactUploaderTest {
 
     PathConverter pathConverter = artifactUploader.upload(ImmutableMap.of(remotePath, file)).get();
 
-    FileArtifactValue metadata = outputs.getMetadata(artifact);
+    FileArtifactValue metadata = outputs.getInputMetadata(artifact);
     Digest digest = DigestUtil.buildDigest(metadata.getDigest(), metadata.getSize());
 
     // assert

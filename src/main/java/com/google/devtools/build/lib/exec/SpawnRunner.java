@@ -23,11 +23,10 @@ import com.google.devtools.build.lib.actions.Artifact.ArtifactExpander;
 import com.google.devtools.build.lib.actions.ArtifactPathResolver;
 import com.google.devtools.build.lib.actions.ExecException;
 import com.google.devtools.build.lib.actions.ForbiddenActionInputException;
+import com.google.devtools.build.lib.actions.InputMetadataProvider;
 import com.google.devtools.build.lib.actions.LostInputsExecException;
-import com.google.devtools.build.lib.actions.MetadataProvider;
 import com.google.devtools.build.lib.actions.Spawn;
 import com.google.devtools.build.lib.actions.SpawnResult;
-import com.google.devtools.build.lib.actions.cache.MetadataInjector;
 import com.google.devtools.build.lib.events.ExtendedEventHandler;
 import com.google.devtools.build.lib.profiler.Profiler;
 import com.google.devtools.build.lib.profiler.ProfilerTask;
@@ -185,7 +184,7 @@ public interface SpawnRunner {
      * The input file metadata cache for this specific spawn, which can be used to efficiently
      * obtain file digests and sizes.
      */
-    MetadataProvider getMetadataProvider();
+    InputMetadataProvider getInputMetadataProvider();
 
     /** An artifact expander. */
     // TODO(ulfjack): This is only used for the sandbox runners to compute a set of empty
@@ -257,12 +256,6 @@ public interface SpawnRunner {
 
     /** Reports a progress update to the Spawn strategy. */
     void report(ProgressStatus progress);
-
-    /**
-     * Returns a {@link MetadataInjector} that allows a caller to inject metadata about spawn
-     * outputs that are stored remotely.
-     */
-    MetadataInjector getMetadataInjector();
 
     /**
      * Returns the context registered for the given identifying type or {@code null} if none was

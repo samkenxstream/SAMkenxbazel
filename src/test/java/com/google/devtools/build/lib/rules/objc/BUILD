@@ -80,6 +80,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/analysis:config/build_configuration",
         "//src/main/java/com/google/devtools/build/lib/analysis:config/build_options",
         "//src/main/java/com/google/devtools/build/lib/analysis:config/compilation_mode",
+        "//src/main/java/com/google/devtools/build/lib/analysis:config/core_options",
         "//src/main/java/com/google/devtools/build/lib/analysis:config/invalid_configuration_exception",
         "//src/main/java/com/google/devtools/build/lib/analysis:config/transitions/split_transition",
         "//src/main/java/com/google/devtools/build/lib/analysis:configured_target",
@@ -94,6 +95,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/rules/apple/cpp",
         "//src/main/java/com/google/devtools/build/lib/rules/cpp",
         "//src/main/java/com/google/devtools/build/lib/rules/objc",
+        "//src/main/java/com/google/devtools/build/lib/skyframe:skyframe_cluster",
         "//src/main/java/com/google/devtools/build/lib/util",
         "//src/main/java/com/google/devtools/build/lib/vfs",
         "//src/main/java/com/google/devtools/build/lib/vfs:pathfragment",
@@ -117,7 +119,10 @@ java_library(
 java_test(
     name = "ObjcRulesTests",
     shard_count = 20,
-    tags = ["no_windows"],
+    tags = [
+        "no_windows",
+        "not_run:arm",
+    ],
     test_class = "com.google.devtools.build.lib.AllTests",
     runtime_deps = [
         ":ObjcRulesTests_lib",

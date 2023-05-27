@@ -67,6 +67,7 @@ java_library(
         ":os",
         ":single_line_formatter",
         ":util",
+        "//third_party:error_prone_annotations",
         "//third_party:guava",
         "//third_party:jsr305",
     ],
@@ -101,6 +102,7 @@ java_library(
         ":shell_escaper",
         "//src/main/java/com/google/devtools/build/lib/shell",
         "//src/main/java/com/google/devtools/build/lib/vfs",
+        "//third_party:error_prone_annotations",
         "//third_party:guava",
         "//third_party:jsr305",
     ],
@@ -158,7 +160,6 @@ java_library(
     srcs = [
         "AbstractIndexer.java",
         "AnsiStrippingOutputStream.java",
-        "BigIntegerFingerprintUtils.java",
         "CPU.java",
         "CanonicalStringIndexer.java",
         "ClassName.java",
@@ -196,11 +197,9 @@ java_library(
         ":string",
         "//src/main/java/com/google/devtools/build/lib/bugreport",
         "//src/main/java/com/google/devtools/build/lib/concurrent",
-        "//src/main/java/com/google/devtools/build/lib/skyframe/serialization/autocodec",
         "//src/main/java/com/google/devtools/build/lib/vfs",
         "//src/main/java/com/google/devtools/build/lib/vfs:pathfragment",
         "//src/main/java/com/google/devtools/common/options",
-        "//third_party:checker_framework_annotations",
         "//third_party:error_prone_annotations",
         "//third_party:flogger",
         "//third_party:guava",
@@ -332,21 +331,17 @@ java_library(
 )
 
 java_library(
+    name = "hash_codes",
+    srcs = ["HashCodes.java"],
+    deps = ["//third_party:jsr305"],
+)
+
+java_library(
     name = "interrupted_failure_details",
     srcs = ["InterruptedFailureDetails.java"],
     deps = [
         ":abrupt_exit_exception",
         ":detailed_exit_code",
         "//src/main/protobuf:failure_details_java_proto",
-    ],
-)
-
-java_library(
-    name = "ps_info_collector",
-    srcs = ["PsInfoCollector.java"],
-    deps = [
-        "//third_party:auto_value",
-        "//third_party:flogger",
-        "//third_party:guava",
     ],
 )

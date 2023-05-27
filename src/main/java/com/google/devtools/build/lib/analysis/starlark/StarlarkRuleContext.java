@@ -123,9 +123,10 @@ public final class StarlarkRuleContext implements StarlarkRuleContextApi<Constra
           PackageIdentifier.createInMainRepo("test"), // for tests
           PackageIdentifier.createInMainRepo("third_party/bazel_rules/rules_android"),
           PackageIdentifier.createUnchecked("build_bazel_rules_android", ""),
+          PackageIdentifier.createUnchecked("rules_android", ""),
           PackageIdentifier.createInMainRepo("tools/build_defs/android"));
 
-  public static final String EXECUTABLE_OUTPUT_NAME = "executable";
+  private static final String EXECUTABLE_OUTPUT_NAME = "executable";
 
   // This field is a copy of the info from ruleContext, stored separately so it can be accessed
   // after this object has been nullified.
@@ -270,7 +271,7 @@ public final class StarlarkRuleContext implements StarlarkRuleContextApi<Constra
       StarlarkAttributesCollection.Builder aspectBuilder =
           StarlarkAttributesCollection.builder(this);
       for (Attribute attribute : attributes) {
-        Object defaultValue = attribute.getDefaultValue(rule);
+        Object defaultValue = attribute.getDefaultValue();
         if (defaultValue instanceof ComputedDefault) {
           defaultValue = ((ComputedDefault) defaultValue).getDefault(ruleContext.attributes());
         }
@@ -302,7 +303,7 @@ public final class StarlarkRuleContext implements StarlarkRuleContextApi<Constra
           continue;
         }
         for (Attribute attribute : aspect.getDefinition().getAttributes().values()) {
-          Object defaultValue = attribute.getDefaultValue(rule);
+          Object defaultValue = attribute.getDefaultValue();
           if (defaultValue instanceof ComputedDefault) {
             defaultValue = ((ComputedDefault) defaultValue).getDefault(ruleContext.attributes());
           }
@@ -459,7 +460,7 @@ public final class StarlarkRuleContext implements StarlarkRuleContextApi<Constra
     return aspectDescriptor;
   }
 
-  public String getRuleLabelCanonicalName() {
+  String getRuleLabelCanonicalName() {
     return ruleLabelCanonicalName;
   }
 
@@ -960,17 +961,22 @@ public final class StarlarkRuleContext implements StarlarkRuleContextApi<Constra
     }
   }
 
-  static void checkPrivateAccess(StarlarkThread thread) throws EvalException {
+  static void checkPrivateAccess(ImmutableSet<PackageIdentifier> allowlist, StarlarkThread thread)
+      throws EvalException {
     Label label =
         ((BazelModuleContext) Module.ofInnermostEnclosingStarlarkFunction(thread).getClientData())
             .label();
-    if (PRIVATE_STARLARKIFICATION_ALLOWLIST.stream()
+    if (allowlist.stream()
         .noneMatch(
             allowedPrefix ->
                 label.getRepository().equals(allowedPrefix.getRepository())
                     && label.getPackageFragment().startsWith(allowedPrefix.getPackageFragment()))) {
       throw Starlark.errorf("Rule in '%s' cannot use private API", label.getPackageName());
     }
+  }
+
+  static void checkPrivateAccess(StarlarkThread thread) throws EvalException {
+    checkPrivateAccess(PRIVATE_STARLARKIFICATION_ALLOWLIST, thread);
   }
 
   @Override
@@ -1018,7 +1024,7 @@ public final class StarlarkRuleContext implements StarlarkRuleContextApi<Constra
       }
       builder.addTransitiveArtifacts(transitiveArtifacts);
     }
-    if (isDepset(symlinks)) {
+    if (isNonEmptyDepset(symlinks)) {
       // If Starlark code directly manipulates symlinks, activate more stringent validity checking.
       checkConflicts = true;
       builder.addSymlinks(((Depset) symlinks).getSet(SymlinkEntry.class));
@@ -1029,7 +1035,7 @@ public final class StarlarkRuleContext implements StarlarkRuleContextApi<Constra
         builder.addSymlink(PathFragment.create(entry.getKey()), entry.getValue());
       }
     }
-    if (isDepset(rootSymlinks)) {
+    if (isNonEmptyDepset(rootSymlinks)) {
       checkConflicts = true;
       builder.addRootSymlinks(((Depset) rootSymlinks).getSet(SymlinkEntry.class));
     } else if (isNonEmptyDict(rootSymlinks)) {
@@ -1050,8 +1056,8 @@ public final class StarlarkRuleContext implements StarlarkRuleContextApi<Constra
     return o instanceof Dict && !((Dict<?, ?>) o).isEmpty();
   }
 
-  private static boolean isDepset(Object o) {
-    return o instanceof Depset;
+  private static boolean isNonEmptyDepset(Object o) {
+    return o instanceof Depset && !((Depset) o).isEmpty();
   }
 
   @Override
@@ -1166,7 +1172,7 @@ public final class StarlarkRuleContext implements StarlarkRuleContextApi<Constra
       throws EvalException {
     if (semantics.getBool(BuildLanguageOptions.INCOMPATIBLE_NEW_ACTIONS_API)) {
       throw Starlark.errorf(
-          "Use %s instead of %s. \n"
+          "Use %s instead of %s.\n"
               + "Use --incompatible_new_actions_api=false to temporarily disable this check.",
           newApi, oldApi);
     }

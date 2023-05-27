@@ -17,7 +17,6 @@ package com.google.devtools.build.lib.starlarkbuildapi.cpp;
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.docgen.annot.DocCategory;
 import com.google.devtools.build.lib.cmdline.Label;
-import com.google.devtools.build.lib.starlarkbuildapi.apple.AppleBitcodeModeApi;
 import javax.annotation.Nullable;
 import net.starlark.java.annot.StarlarkBuiltin;
 import net.starlark.java.annot.StarlarkMethod;
@@ -99,7 +98,7 @@ public interface CppConfigurationApi<InvalidConfigurationExceptionT extends Exce
       doc =
           "Returns label pointed to by <a href=\"${link user-manual#flag--custom_malloc}\">"
               + "<code>--custom_malloc</code></a> option. Can be accessed with"
-              + " <a href=\"globals.html#configuration_field\"><code>configuration_field"
+              + " <a href=\"../globals/bzl.html#configuration_field\"><code>configuration_field"
               + "</code></a>:<br/>"
               + "<pre>attr.label(<br/>"
               + "    default = configuration_field(<br/>"
@@ -151,11 +150,10 @@ public interface CppConfigurationApi<InvalidConfigurationExceptionT extends Exce
   @StarlarkMethod(
       name = "apple_bitcode_mode",
       doc =
-          "Returns the Bitcode mode to use for compilation steps.<p>This field is only valid for"
-              + " Apple, and only for device builds; for simulator builds, it always returns "
-              + "<code>'none'</code>.",
+          "Deprecated: Returns the Bitcode mode to use for compilation steps. "
+              + "Always returns <code>'none'</code>.",
       structField = true)
-  AppleBitcodeModeApi getAppleBitcodeMode();
+  String getAppleBitcodeMode();
 
   @StarlarkMethod(
       name = "apple_generate_dsym",

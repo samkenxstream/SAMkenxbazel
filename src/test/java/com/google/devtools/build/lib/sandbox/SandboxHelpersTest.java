@@ -171,7 +171,7 @@ public class SandboxHelpersTest {
                     sandboxHelpers.processInputFiles(
                         inputMap(input), customExecRoot, customExecRoot, ImmutableList.of(), null);
                 finishProcessingSemaphore.release();
-              } catch (IOException e) {
+              } catch (IOException | InterruptedException e) {
                 throw new IllegalArgumentException(e);
               }
             });
@@ -240,7 +240,7 @@ public class SandboxHelpersTest {
   }
 
   @Test
-  public void cleanExisting_updatesDirs() throws IOException {
+  public void cleanExisting_updatesDirs() throws IOException, InterruptedException {
     RootedPath inputTxt =
         RootedPath.toRootedPath(
             Root.fromPath(scratch.getFileSystem().getPath("/")), PathFragment.create("hello.txt"));

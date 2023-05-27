@@ -157,6 +157,8 @@ public class MetricsCollectorTest extends BuildIntegrationTestCase {
 
     // Do one build of a target in a standalone package. Gets us a baseline for analysis/execution.
     buildTarget("//e:facade");
+    boolean skymeldWasInvolved =
+        getCommandEnvironment().withMergedAnalysisAndExecutionSourceOfTruth();
     BuildGraphMetrics buildGraphMetrics =
         buildMetricsEventListener.event.getBuildMetrics().getBuildGraphMetrics();
     int actionLookupValueCount = buildGraphMetrics.getActionLookupValueCount();
@@ -225,6 +227,10 @@ public class MetricsCollectorTest extends BuildIntegrationTestCase {
 
     // Do a null build. No useful analysis stats.
     buildTarget("//a");
+    if (skymeldWasInvolved) {
+      // The BuildDriverKey of //e:facade is gone.
+      newGraphSize -= 1;
+    }
 
     // For null build, we don't do any conflict checking. As the metrics are collected during the
     // traversal that's part of conflict checking, these analysis-related numbers are 0.
@@ -297,6 +303,11 @@ public class MetricsCollectorTest extends BuildIntegrationTestCase {
 
     // Null --nobuild.
     buildTarget("//a");
+    if (skymeldWasInvolved) {
+      // When doing --nobuild, no new BuildDriverKey entry is put in the graph while the old one is
+      // deleted.
+      newGraphSize -= 1;
+    }
     assertThat(buildMetricsEventListener.event.getBuildMetrics().getBuildGraphMetrics())
         .ignoringFieldAbsence()
         .isEqualTo(
@@ -308,6 +319,10 @@ public class MetricsCollectorTest extends BuildIntegrationTestCase {
     // Do a null full build. Back to baseline.
     addOptions("--build");
     buildTarget("//a");
+    if (skymeldWasInvolved) {
+      // Extra BuildDriverKey
+      newGraphSize += 1;
+    }
     assertThat(buildMetricsEventListener.event.getBuildMetrics().getBuildGraphMetrics())
         .ignoringFieldAbsence()
         .isEqualTo(
@@ -601,7 +616,7 @@ public class MetricsCollectorTest extends BuildIntegrationTestCase {
   }
 
   @Test
-  public void skymeldNullIncrementalBuild_buildGraphMetricsCollected() throws Exception {
+  public void skymeldNullIncrementalBuild_buildGraphMetricsNotCollected() throws Exception {
     write(
         "foo/BUILD",
         "genrule(",
@@ -619,8 +634,8 @@ public class MetricsCollectorTest extends BuildIntegrationTestCase {
     addOptions("--experimental_merged_skyframe_analysis_execution");
     BuildGraphMetrics expected =
         BuildGraphMetrics.newBuilder()
-            .setActionLookupValueCount(3)
-            .setActionLookupValueCountNotIncludingAspects(3)
+            .setActionLookupValueCount(8)
+            .setActionLookupValueCountNotIncludingAspects(8)
             .setActionCount(2)
             .setActionCountNotIncludingAspects(2)
             .setInputFileConfiguredTargetCount(1)
@@ -635,11 +650,17 @@ public class MetricsCollectorTest extends BuildIntegrationTestCase {
     // Null build.
     buildTarget("//foo:foo", "//foo:bar");
 
-    // For Skymeld, we expect BuildGraphMetrics to include all the entities that were touched in the
-    // build. This is not true for regular blaze: the metric is only collected if there's conflict
-    // checking.
+    BuildGraphMetrics expectedNullBuild =
+        BuildGraphMetrics.newBuilder()
+            .setActionLookupValueCount(0)
+            .setActionLookupValueCountNotIncludingAspects(0)
+            .setActionCount(0)
+            .setActionCountNotIncludingAspects(0)
+            .setInputFileConfiguredTargetCount(0)
+            .setOutputArtifactCount(0)
+            .build();
     assertThat(buildMetricsEventListener.event.getBuildMetrics().getBuildGraphMetrics())
         .comparingExpectedFieldsOnly()
-        .isEqualTo(expected);
+        .isEqualTo(expectedNullBuild);
   }
 }

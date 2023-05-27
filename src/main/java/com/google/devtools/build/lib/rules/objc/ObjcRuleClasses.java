@@ -32,14 +32,12 @@ import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
 import com.google.devtools.build.lib.analysis.Runfiles;
 import com.google.devtools.build.lib.analysis.RunfilesProvider;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
-import com.google.devtools.build.lib.analysis.config.ExecutionTransitionFactory;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder.RuleClassType;
 import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.rules.apple.AppleConfiguration;
 import com.google.devtools.build.lib.rules.apple.ApplePlatform;
-import com.google.devtools.build.lib.rules.apple.AppleToolchain.RequiresXcodeConfigRule;
 import com.google.devtools.build.lib.rules.apple.XcodeConfigInfo;
 import com.google.devtools.build.lib.rules.cpp.CcInfo;
 import com.google.devtools.build.lib.rules.cpp.CcToolchain;
@@ -380,18 +378,17 @@ public class ObjcRuleClasses {
           The list of targets that are linked together to form the final bundle.
           <!-- #END_BLAZE_RULE.ATTRIBUTE -->*/
           .override(
-              attr("deps", LABEL_LIST)
-                  .direct_compile_time_input()
-                  .mandatoryProviders(CcInfo.PROVIDER.id())
-                  .allowedFileTypes())
-          /* <!-- #BLAZE_RULE($objc_compiling_rule).ATTRIBUTE(runtime_deps) -->
-          The list of framework targets that are late loaded at runtime.  They are included in the
-          app bundle but not linked against at build time.
+              attr("deps", LABEL_LIST).mandatoryProviders(CcInfo.PROVIDER.id()).allowedFileTypes())
+          /* <!-- #BLAZE_RULE($objc_compiling_rule).ATTRIBUTE(implementation_deps) -->
+          The list of other libraries that the library target depends on. Unlike with
+          <code>deps</code>, the headers and include paths of these libraries (and all their
+          transitive deps) are only used for compilation of this library, and not libraries that
+          depend on it. Libraries specified with <code>implementation_deps</code> are still linked
+          in binary targets that depend on this library.
           <!-- #END_BLAZE_RULE.ATTRIBUTE -->*/
           .add(
-              attr("runtime_deps", LABEL_LIST)
-                  .direct_compile_time_input()
-                  .mandatoryProviders(AppleDynamicFrameworkInfo.STARLARK_CONSTRUCTOR.id())
+              attr("implementation_deps", LABEL_LIST)
+                  .mandatoryProviders(CcInfo.PROVIDER.id())
                   .allowedFileTypes())
           /* <!-- #BLAZE_RULE($objc_compiling_rule).ATTRIBUTE(defines) -->
           Extra <code>-D</code> flags to pass to the compiler. They should be in
@@ -436,7 +433,6 @@ public class ObjcRuleClasses {
               BaseRuleClasses.NativeActionCreatingRule.class,
               CompileDependencyRule.class,
               CoptsRule.class,
-              XcrunRule.class,
               CrosstoolRule.class)
           .build();
     }
@@ -476,26 +472,4 @@ public class ObjcRuleClasses {
 
   /** Attribute name for the minimum OS version (e.g. "7.3"). */
   static final String MINIMUM_OS_VERSION = "minimum_os_version";
-
-  /** Common attributes for {@code objc_*} rules that need to call xcrun. */
-  public static class XcrunRule implements RuleDefinition {
-    @Override
-    public RuleClass build(RuleClass.Builder builder, RuleDefinitionEnvironment env) {
-      return builder
-          .add(
-              attr("$xcrunwrapper", LABEL)
-                  .cfg(ExecutionTransitionFactory.create())
-                  .exec()
-                  .value(env.getToolsLabel("//tools/objc:xcrunwrapper")))
-          .build();
-    }
-    @Override
-    public Metadata getMetadata() {
-      return RuleDefinition.Metadata.builder()
-          .name("$objc_xcrun_rule")
-          .type(RuleClassType.ABSTRACT)
-          .ancestors(RequiresXcodeConfigRule.class)
-          .build();
-    }
-  }
 }

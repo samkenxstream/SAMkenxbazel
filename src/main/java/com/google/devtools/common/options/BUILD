@@ -11,8 +11,8 @@ package(
 filegroup(
     name = "srcs",
     srcs = glob(["**"]) + [
-        "//src/main/java/com/google/devtools/common/options/testing:srcs",
         "//src/main/java/com/google/devtools/common/options/processor:srcs",
+        "//src/main/java/com/google/devtools/common/options/testing:srcs",
     ],
     visibility = ["//src:__subpackages__"],
 )
@@ -49,6 +49,7 @@ java_library(
         ],
     ),
     deps = [
+        "//src/main/java/com/google/devtools/build/lib/util:pair",
         "//third_party:auto_value",
         "//third_party:caffeine",
         "//third_party:guava",

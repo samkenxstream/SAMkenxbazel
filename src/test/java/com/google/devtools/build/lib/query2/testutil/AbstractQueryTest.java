@@ -64,8 +64,10 @@ import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
+import java.util.Collections;
 import java.util.List;
 import java.util.Set;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -81,11 +83,6 @@ public abstract class AbstractQueryTest<T> {
   protected static final ImmutableSet<?> EMPTY = ImmutableSet.of();
 
   private static final String DEFAULT_UNIVERSE = "//...:*";
-
-  protected static final String BAD_PACKAGE_NAME =
-      "package names may contain "
-          + "A-Z, a-z, 0-9, or any of ' !\"#$%&'()*+,-./;<=>?[]^_`{|}~' "
-          + "(most 7-bit ascii characters except 0-31, 127, ':', or '\\')";
 
   protected MockToolsConfig mockToolsConfig;
   protected QueryHelper<T> helper;
@@ -103,17 +100,17 @@ public abstract class AbstractQueryTest<T> {
 
   @Before
   public final void initializeQueryHelper() throws Exception {
-    QueryHelper<T> helper = createQueryHelper();
+    helper = createQueryHelper();
     helper.setUp();
-    setUpWithQueryHelper(helper);
-  }
-
-  protected final void setUpWithQueryHelper(QueryHelper<T> helper) throws Exception {
-    this.helper = helper;
     mockToolsConfig = new MockToolsConfig(helper.getRootDirectory());
     analysisMock = AnalysisMock.get();
     helper.setUniverseScope(getDefaultUniverseScope());
     helper.useRuleClassProvider(setRuleClassProviders().build());
+  }
+
+  @After
+  public final void cleanUpQueryHelper() {
+    helper.cleanUp();
   }
 
   /**
@@ -323,7 +320,7 @@ public abstract class AbstractQueryTest<T> {
   protected final void checkResultofBadTargetLiterals(String message, FailureDetail failureDetail) {
     assertThat(failureDetail.getTargetPatterns().getCode())
         .isEqualTo(TargetPatterns.Code.LABEL_SYNTAX_ERROR);
-    assertThat(message).isEqualTo("Invalid package name 'bad:*': " + BAD_PACKAGE_NAME);
+    assertThat(message).isEqualTo("invalid target name '*:*': target names may not contain ':'");
   }
 
   @Test
@@ -364,7 +361,8 @@ public abstract class AbstractQueryTest<T> {
     writeFile(
         "c/BUILD",
         "genrule(name='c', srcs=['p', 'q'], outs=['r', 's'], cmd=':')",
-        "cc_binary(name='d', srcs=['e.cc'], data=['r'])");
+        "cc_binary(name='d', srcs=['e.cc'], data=['r'])",
+        "cc_test(name='f', srcs=['g.cc'])");
   }
 
   @Test
@@ -372,19 +370,23 @@ public abstract class AbstractQueryTest<T> {
     writeBuildFiles2();
     assertThat(evalToString("c:*"))
         .isEqualTo(
-            "//c:BUILD //c:c //c:d //c:d.dwp //c:d.stripped //c:e.cc //c:p //c:q //c:r //c:s");
-    assertThat(evalToString("kind(rule, c:*)")).isEqualTo("//c:c //c:d");
+            "//c:BUILD //c:c //c:d //c:d.dwp //c:d.stripped //c:e.cc //c:f //c:f.dwp //c:f.stripped"
+                + " //c:g.cc //c:p //c:q //c:r //c:s");
+    assertThat(evalToString("kind(rule, c:*)")).isEqualTo("//c:c //c:d //c:f");
     assertThat(evalToString("kind(genrule, c:*)")).isEqualTo("//c:c");
-    assertThat(evalToString("kind(cc.*, c:*)")).isEqualTo("//c:d");
+    assertThat(evalToString("kind(cc.*, c:*)")).isEqualTo("//c:d //c:f");
     assertThat(evalToString("kind(file, c:*)"))
-        .isEqualTo("//c:BUILD //c:d.dwp //c:d.stripped //c:e.cc //c:p //c:q //c:r //c:s");
+        .isEqualTo(
+            "//c:BUILD //c:d.dwp //c:d.stripped //c:e.cc //c:f.dwp //c:f.stripped //c:g.cc //c:p"
+                + " //c:q //c:r //c:s");
     assertThat(evalToString("kind(gener.*, c:*)"))
-        .isEqualTo("//c:d.dwp //c:d.stripped //c:r //c:s");
+        .isEqualTo("//c:d.dwp //c:d.stripped //c:f.dwp //c:f.stripped //c:r //c:s");
     assertThat(evalToString("kind(gen.*, c:*)"))
-        .isEqualTo("//c:c //c:d.dwp //c:d.stripped //c:r //c:s");
-    assertThat(evalToString("kind(source, c:*)")).isEqualTo("//c:BUILD //c:e.cc //c:p //c:q");
+        .isEqualTo("//c:c //c:d.dwp //c:d.stripped //c:f.dwp //c:f.stripped //c:r //c:s");
+    assertThat(evalToString("kind(source, c:*)"))
+        .isEqualTo("//c:BUILD //c:e.cc //c:g.cc //c:p //c:q");
     assertThat(evalToString("kind('source file', c:*)"))
-        .isEqualTo("//c:BUILD //c:e.cc //c:p //c:q");
+        .isEqualTo("//c:BUILD //c:e.cc //c:g.cc //c:p //c:q");
   }
 
   @Test
@@ -392,11 +394,13 @@ public abstract class AbstractQueryTest<T> {
     writeBuildFiles2();
     assertThat(evalToString("c:*"))
         .isEqualTo(
-            "//c:BUILD //c:c //c:d //c:d.dwp //c:d.stripped //c:e.cc //c:p //c:q //c:r //c:s");
+            "//c:BUILD //c:c //c:d //c:d.dwp //c:d.stripped //c:e.cc //c:f //c:f.dwp //c:f.stripped"
+                + " //c:g.cc //c:p //c:q //c:r //c:s");
     assertThat(evalToString("filter(BUILD, c:*)")).isEqualTo("//c:BUILD");
-    assertThat(evalToString("filter('\\.cc$', c:*)")).isEqualTo("//c:e.cc");
-    assertThat(evalToString("filter(//c.*cc$, c:*)")).isEqualTo("//c:e.cc");
-    assertThat(evalToString("filter(:.$, c:*)")).isEqualTo("//c:c //c:d //c:p //c:q //c:r //c:s");
+    assertThat(evalToString("filter('\\.cc$', c:*)")).isEqualTo("//c:e.cc //c:g.cc");
+    assertThat(evalToString("filter(//c.*cc$, c:*)")).isEqualTo("//c:e.cc //c:g.cc");
+    assertThat(evalToString("filter(:.$, c:*)"))
+        .isEqualTo("//c:c //c:d //c:f //c:p //c:q //c:r //c:s");
   }
 
   @Test
@@ -404,8 +408,8 @@ public abstract class AbstractQueryTest<T> {
     writeBuildFiles2();
     writeBuildFilesWithConfigurableAttributes();
 
-    assertThat(evalToString("attr(name, '.*', '//c:*')")).isEqualTo("//c:c //c:d");
-    assertThat(evalToString("attr(name, '.+', '//c:*')")).isEqualTo("//c:c //c:d");
+    assertThat(evalToString("attr(name, '.*', '//c:*')")).isEqualTo("//c:c //c:d //c:f");
+    assertThat(evalToString("attr(name, '.+', '//c:*')")).isEqualTo("//c:c //c:d //c:f");
     assertThat(evalToString("attr(name, '.*d.*', '//c:*')")).isEqualTo("//c:d");
 
     assertThat(evalToString("attr(name, '.*e.*', '//c:*')")).isEmpty();
@@ -418,17 +422,18 @@ public abstract class AbstractQueryTest<T> {
 
     assertThat(evalToString("c:*"))
         .isEqualTo(
-            "//c:BUILD //c:c //c:d //c:d.dwp //c:d.stripped //c:e.cc //c:p //c:q //c:r //c:s");
+            "//c:BUILD //c:c //c:d //c:d.dwp //c:d.stripped //c:e.cc //c:f //c:f.dwp //c:f.stripped"
+                + " //c:g.cc //c:p //c:q //c:r //c:s");
     assertThat(evalToString("attr(cmd,':', c:*)")).isEqualTo("//c:c");
     // Using "empty" pattern will just check existence of the attribute.
     assertThat(evalToString("attr(cmd,'', c:*)")).isEqualTo("//c:c");
-    assertThat(evalToString("attr(linkshared, 0, c:*)")).isEqualTo("//c:d");
+    assertThat(evalToString("attr(linkshared, 0, c:*)")).isEqualTo("//c:d //c:f");
     assertThat(evalToString("attr('data', 'r', c:*)")).isEqualTo("//c:d");
     // Empty list attribute value always resolves to '[]'. If list attribute has
     // more than one value, the will be delimited with ','.
-    assertThat(evalToString("attr('deps', '\\[\\]', c:*)")).isEqualTo("//c:d");
-    assertThat(evalToString("attr('deps', '^..$', c:*)")).isEqualTo("//c:d");
-    assertThat(evalToString("attr('srcs', '\\[[^,]+\\]', c:*)")).isEqualTo("//c:d");
+    assertThat(evalToString("attr('deps', '\\[\\]', c:*)")).isEqualTo("//c:d //c:f");
+    assertThat(evalToString("attr('deps', '^..$', c:*)")).isEqualTo("//c:d //c:f");
+    assertThat(evalToString("attr('srcs', '\\[[^,]+\\]', c:*)")).isEqualTo("//c:d //c:f");
 
     // Configurable attributes:
     if (testConfigurableAttributes()) {
@@ -2182,6 +2187,19 @@ public abstract class AbstractQueryTest<T> {
         Setting.NO_IMPLICIT_DEPS);
   }
 
+  @Test
+  public void testDeepNestedLet() throws Exception {
+    writeFile("foo/BUILD", "sh_library(name = 'foo')");
+
+    // We used to get a StackOverflowError at this depth. We're still vulnerable to stack overflows
+    // at higher depths, due to how the query engine works.
+    int nestingDepth = 500;
+    String queryString =
+        Joiner.on(" + ").join(Collections.nCopies(nestingDepth, "let x = //foo:foo in $x"));
+
+    assertThat(evalToString(queryString)).isEqualTo("//foo:foo");
+  }
+
   protected void writeBzlmodBuildFiles() throws Exception {
     helper.overwriteFile(
         "MODULE.bazel", "bazel_dep(name= 'repo', version='1.0', repo_name='my_repo')");
@@ -2241,8 +2259,9 @@ public abstract class AbstractQueryTest<T> {
   public interface QueryHelper<T> {
 
     /** Basic set-up; this is called once at the beginning of a test, before anything else. */
-    @Before
     void setUp() throws Exception;
+
+    void cleanUp();
 
     void setKeepGoing(boolean keepGoing);
 

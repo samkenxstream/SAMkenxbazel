@@ -14,6 +14,8 @@
 
 package com.google.devtools.build.lib.rules.cpp;
 
+import static com.google.common.collect.ImmutableList.toImmutableList;
+
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -29,20 +31,14 @@ import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.rules.cpp.CcToolchainFeatures.FeatureConfiguration;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import java.util.regex.Pattern;
-import javax.annotation.Nullable;
 
 /** Handles creation of CppCompileAction used to compile linkstamp sources. */
-public class CppLinkstampCompileHelper {
+public final class CppLinkstampCompileHelper {
 
-  /**
-   * Creates {@link CppCompileAction} to compile linkstamp source
-   *
-   * @param inputsForInvalidation: see {@link CppCompileAction#inputsForInvalidation}
-   */
+  /** Creates {@link CppCompileAction} to compile linkstamp source. */
   public static CppCompileAction createLinkstampCompileAction(
       RuleErrorConsumer ruleErrorConsumer,
       ActionConstructionContext actionConstructionContext,
-      @Nullable Artifact grepIncludes,
       BuildConfigurationValue configuration,
       Artifact sourceFile,
       Artifact outputFile,
@@ -62,7 +58,7 @@ public class CppLinkstampCompileHelper {
       CppSemantics semantics) {
     CppCompileActionBuilder builder =
         new CppCompileActionBuilder(
-                actionConstructionContext, grepIncludes, ccToolchainProvider, configuration)
+                actionConstructionContext, ccToolchainProvider, configuration, semantics)
             .addMandatoryInputs(compilationInputs)
             .setVariables(
                 getVariables(
@@ -83,14 +79,14 @@ public class CppLinkstampCompileHelper {
                     semantics))
             .setFeatureConfiguration(featureConfiguration)
             .setSourceFile(sourceFile)
-            .setSemantics(semantics)
             .setOutputs(outputFile, /* dotdFile= */ null, /* diagnosticsFile= */ null)
-            .setInputsForInvalidation(inputsForInvalidation)
-            .setBuiltinIncludeFiles(buildInfoHeaderArtifacts)
+            .setCacheKeyInputs(inputsForInvalidation)
+            .setBuildInfoHeaderArtifacts(buildInfoHeaderArtifacts)
             .addMandatoryInputs(nonCodeInputs)
             .setShareable(true)
             .setShouldScanIncludes(false)
             .setActionName(CppActionNames.LINKSTAMP_COMPILE);
+
     semantics.finalizeCompileActionBuilder(
         configuration, featureConfiguration, builder, ruleErrorConsumer);
     return builder.buildOrThrowIllegalStateException();
@@ -169,7 +165,7 @@ public class CppLinkstampCompileHelper {
         /* ltoIndexingFile= */ null,
         buildInfoHeaderArtifacts.stream()
             .map(Artifact::getExecPathString)
-            .collect(ImmutableList.toImmutableList()),
+            .collect(toImmutableList()),
         CcCompilationHelper.getCoptsFromOptions(
             cppConfiguration, semantics, sourceFile.getExecPathString()),
         /* cppModuleMap= */ null,
@@ -193,4 +189,6 @@ public class CppLinkstampCompileHelper {
             codeCoverageEnabled),
         /* localDefines= */ ImmutableList.of());
   }
+
+  private CppLinkstampCompileHelper() {}
 }

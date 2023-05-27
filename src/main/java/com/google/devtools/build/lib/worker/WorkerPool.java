@@ -13,6 +13,8 @@
 // limitations under the License.
 package com.google.devtools.build.lib.worker;
 
+import com.google.common.collect.ImmutableSet;
+import com.google.common.eventbus.EventBus;
 import java.io.IOException;
 import org.apache.commons.pool2.impl.EvictionPolicy;
 
@@ -37,11 +39,15 @@ public interface WorkerPool {
 
   Worker borrowObject(WorkerKey key) throws IOException, InterruptedException;
 
-  boolean couldBeBorrowed(WorkerKey key);
-
   void returnObject(WorkerKey key, Worker obj);
 
   void invalidateObject(WorkerKey key, Worker obj) throws InterruptedException;
+
+  void setDoomedWorkers(ImmutableSet<Integer> workerIds);
+
+  void clearDoomedWorkers();
+
+  void setEventBus(EventBus eventBus);
 
   void close();
 }

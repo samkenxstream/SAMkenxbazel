@@ -16,7 +16,7 @@
 """
 
 load(":common/cc/semantics.bzl", "semantics")
-load(":common/cc/experimental_cc_shared_library.bzl", "CcSharedLibraryInfo", "graph_structure_aspect")
+load(":common/cc/cc_shared_library.bzl", "CcSharedLibraryInfo", "graph_structure_aspect")
 load(":common/cc/cc_info.bzl", "CcInfo")
 
 cc_internal = _builtins.internal.cc_internal
@@ -96,6 +96,7 @@ cc_binary_attrs_with_aspects = {
     "_cc_toolchain": attr.label(default = "@" + semantics.get_repo() + "//tools/cpp:current_cc_toolchain"),
     "_cc_toolchain_type": attr.label(default = "@" + semantics.get_repo() + "//tools/cpp:toolchain_type"),
     "_def_parser": semantics.get_def_parser(),
+    "_use_auto_exec_groups": attr.bool(default = True),
 }
 
 cc_binary_attrs_with_aspects.update(semantics.get_distribs_attr())

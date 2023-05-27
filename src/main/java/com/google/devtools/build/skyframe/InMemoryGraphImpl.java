@@ -13,10 +13,20 @@
 // limitations under the License.
 package com.google.devtools.build.skyframe;
 
-import com.google.common.annotations.VisibleForTesting;
+import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.base.Preconditions.checkState;
+
+import com.google.common.collect.ImmutableSortedMap;
 import com.google.common.collect.Maps;
+import com.google.devtools.build.lib.cmdline.Label;
+import com.google.devtools.build.lib.cmdline.Label.LabelInterner;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier;
+import com.google.devtools.build.lib.concurrent.PooledInterner;
+import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.profiler.AutoProfiler;
 import com.google.devtools.build.lib.profiler.GoogleAutoProfilerUtils;
+import com.google.devtools.build.lib.skyframe.PackageValue;
+import com.google.devtools.build.lib.skyframe.SkyFunctions;
 import com.google.devtools.build.lib.supplier.InterruptibleSupplier;
 import com.google.devtools.build.skyframe.SkyKey.SkyKeyInterner;
 import com.google.errorprone.annotations.CanIgnoreReturnValue;
@@ -28,6 +38,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.Lock;
 import java.util.function.Consumer;
 import javax.annotation.Nullable;
 
@@ -44,47 +55,84 @@ public class InMemoryGraphImpl implements InMemoryGraph {
   protected final ConcurrentHashMap<SkyKey, InMemoryNodeEntry> nodeMap;
   private final NodeBatch getBatch;
   private final NodeBatch createIfAbsentBatch;
-
-  // TODO(b/250641010): Remove this class member along with the startup flag.
-  private final boolean usePooledSkyKeyInterning;
+  private final boolean usePooledInterning;
 
   InMemoryGraphImpl() {
     this(/* initialCapacity= */ 1 << 10);
   }
 
-  @VisibleForTesting
-  public InMemoryGraphImpl(boolean usePooledSkyKeyInterning) {
-    this(/* initialCapacity= */ 1 << 10, usePooledSkyKeyInterning);
+  /**
+   * For some shell integration tests, we don't want to apply {@link SkyKeyInterner} created and
+   * bind {@code SkyKeyInterner#globalPool} to the second {@link InMemoryGraph}.
+   */
+  InMemoryGraphImpl(boolean usePooledInterning) {
+    this(/* initialCapacity= */ 1 << 10, usePooledInterning);
   }
 
   protected InMemoryGraphImpl(int initialCapacity) {
-    this(initialCapacity, UsePooledSkyKeyInterningFlag.usePooledSkyKeyInterningFlag());
+    this(initialCapacity, /* usePooledInterning= */ true);
   }
 
-  private InMemoryGraphImpl(int initialCapacity, boolean usePooledSkyKeyInterning) {
+  private InMemoryGraphImpl(int initialCapacity, boolean usePooledInterning) {
     this.nodeMap = new ConcurrentHashMap<>(initialCapacity);
     this.getBatch = nodeMap::get;
     this.createIfAbsentBatch = this::createIfAbsent;
-    this.usePooledSkyKeyInterning = usePooledSkyKeyInterning;
-    if (usePooledSkyKeyInterning) {
-      SkyKeyInterner.setGlobalPool(this);
+    this.usePooledInterning = usePooledInterning;
+    if (usePooledInterning) {
+      SkyKeyInterner.setGlobalPool(new SkyKeyPool());
+      if (UsePooledLabelInterningFlag.usePooledLabelInterningFlag()) {
+        LabelInterner.setGlobalPool(new LabelPool());
+      }
     }
   }
 
   @Override
   public void remove(SkyKey skyKey) {
-    weakIntern(skyKey);
-    nodeMap.remove(skyKey);
+    weakInternSkyKey(skyKey);
+    InMemoryNodeEntry nodeEntry = nodeMap.remove(skyKey);
+    if (skyKey instanceof PackageIdentifier && nodeEntry != null) {
+      weakInternPackageTargetsLabels(
+          (PackageValue) nodeEntry.toValue()); // Dirty or changed value are needed.
+    }
   }
 
-  private void weakIntern(SkyKey skyKey) {
-    if (!usePooledSkyKeyInterning) {
+  @Override
+  public void removeIfDone(SkyKey key) {
+    nodeMap.computeIfPresent(
+        key,
+        (k, e) -> {
+          if (e.isDone()) {
+            weakInternSkyKey(k);
+            if (k instanceof PackageIdentifier) {
+              weakInternPackageTargetsLabels((PackageValue) e.toValue());
+            }
+            return null;
+          }
+          return e;
+        });
+  }
+
+  private void weakInternSkyKey(SkyKey skyKey) {
+    if (!usePooledInterning) {
       return;
     }
     SkyKeyInterner<?> interner = skyKey.getSkyKeyInterner();
     if (interner != null) {
-      interner.weakIntern(skyKey);
+      interner.weakInternUnchecked(skyKey);
     }
+  }
+
+  private void weakInternPackageTargetsLabels(@Nullable PackageValue packageValue) {
+    if (!usePooledInterning || packageValue == null) {
+      return;
+    }
+    LabelInterner interner = Label.getLabelInterner();
+    if (interner == null) {
+      return;
+    }
+
+    ImmutableSortedMap<String, Target> targets = packageValue.getPackage().getTargets();
+    targets.values().forEach(t -> interner.weakIntern(t.getLabel()));
   }
 
   @Override
@@ -137,7 +185,7 @@ public class InMemoryGraphImpl implements InMemoryGraph {
   @CanIgnoreReturnValue
   private InMemoryNodeEntry createIfAbsent(SkyKey skyKey) {
     SkyKeyInterner<?> interner = skyKey.getSkyKeyInterner();
-    if (!usePooledSkyKeyInterning || interner == null) {
+    if (!usePooledInterning || interner == null) {
       return nodeMap.computeIfAbsent(skyKey, this::newNodeEntry);
     }
 
@@ -190,59 +238,122 @@ public class InMemoryGraphImpl implements InMemoryGraph {
     nodeMap.forEachValue(PARALLELISM_THRESHOLD, consumer);
   }
 
-  @Override
-  public SkyKey getOrWeakIntern(SkyKey key) {
-    // Use computeIfAbsent not to mutate the map, but to call weakIntern under synchronization. This
-    // ensures that the canonical instance isn't being transferred to the node map concurrently in
-    // createIfAbsent. In the common case that the key is already present in the node map, this is a
-    // lock-free lookup.
-    SkyKey[] weakInterned = new SkyKey[1];
-    InMemoryNodeEntry nodeEntry =
-        nodeMap.computeIfAbsent(
-            key,
-            k -> {
-              weakInterned[0] = k.getSkyKeyInterner().weakIntern(k);
-              return null; // Don't actually store a mapping.
-            });
-    return nodeEntry != null ? nodeEntry.getKey() : weakInterned[0];
-  }
-
   /**
    * Re-interns {@link SkyKey} instances that use {@link SkyKeyInterner} in node map back to the
    * {@link SkyKeyInterner}'s weak interner.
    *
-   * <p>Also uninstalls this {@link InMemoryGraphImpl} instance from being {@link SkyKeyInterner}'s
+   * <p>Also uninstalls current {@link SkyKeyPool} instance from being {@link SkyKeyInterner}'s
    * static global pool.
    */
   @Override
-  public void cleanupPool() {
-    if (!usePooledSkyKeyInterning) {
-      // No clean up is needed when UseSkyKeyInternerFlag startup flag is off.
+  public void cleanupInterningPool() {
+    if (!usePooledInterning) {
+      // No clean up is needed when `usePooledInterning` is false for shell integration tests.
       return;
     }
     try (AutoProfiler ignored =
-        GoogleAutoProfilerUtils.logged(
-            "re-interning Skykeys back to bazel regular weak interner from SkyKeyPool",
-            Duration.ofMillis(2L))) {
-      parallelForEach(e -> weakIntern(e.getKey()));
+        GoogleAutoProfilerUtils.logged("Cleaning up interning pools", Duration.ofMillis(2L))) {
+      parallelForEach(
+          e -> {
+            weakInternSkyKey(e.getKey());
+
+            if (!UsePooledLabelInterningFlag.usePooledLabelInterningFlag()
+                || !e.isDone()
+                || !e.getKey().functionName().equals(SkyFunctions.PACKAGE)) {
+              return;
+            }
+
+            weakInternPackageTargetsLabels((PackageValue) e.toValue());
+          });
     }
+
     SkyKeyInterner.setGlobalPool(null);
+    LabelInterner.setGlobalPool(null);
   }
 
   static final class EdgelessInMemoryGraphImpl extends InMemoryGraphImpl {
 
-    public EdgelessInMemoryGraphImpl() {
-      super();
-    }
-
-    @VisibleForTesting
-    public EdgelessInMemoryGraphImpl(boolean usePooledSkyKeyInterning) {
-      super(usePooledSkyKeyInterning);
+    public EdgelessInMemoryGraphImpl(boolean usePooledInterning) {
+      super(usePooledInterning);
     }
 
     @Override
     protected InMemoryNodeEntry newNodeEntry(SkyKey key) {
       return new EdgelessInMemoryNodeEntry(key);
     }
+  }
+
+  /** {@link PooledInterner.Pool} for {@link SkyKey}s. */
+  final class SkyKeyPool implements PooledInterner.Pool<SkyKey> {
+
+    @Override
+    public SkyKey getOrWeakIntern(SkyKey sample) {
+      // Use computeIfAbsent not to mutate the map, but to call weakIntern under synchronization.
+      // This ensures that the canonical instance isn't being transferred to the node map
+      // concurrently in createIfAbsent. In the common case that the key is already present in the
+      // node map, this is a lock-free lookup.
+      SkyKey[] weakInterned = new SkyKey[1];
+      InMemoryNodeEntry nodeEntry =
+          nodeMap.computeIfAbsent(
+              sample,
+              k -> {
+                weakInterned[0] = k.getSkyKeyInterner().weakInternUnchecked(k);
+                return null; // Don't actually store a mapping.
+              });
+      return nodeEntry != null ? nodeEntry.getKey() : weakInterned[0];
+    }
+  }
+
+  /** {@link PooledInterner.Pool} for {@link Label}s. */
+  final class LabelPool implements PooledInterner.Pool<Label> {
+    @Override
+    public Label getOrWeakIntern(Label sample) {
+      LabelInterner interner = checkNotNull(Label.getLabelInterner());
+
+      PackageIdentifier packageIdentifier = sample.getPackageIdentifier();
+
+      // Return pooled instance if sample is present in the pool.
+      InMemoryNodeEntry inMemoryNodeEntry = nodeMap.get(packageIdentifier);
+      if (inMemoryNodeEntry != null) {
+        Label pooledInstance = getLabelFromInMemoryNodeEntry(inMemoryNodeEntry, sample);
+        if (pooledInstance != null) {
+          return pooledInstance;
+        }
+      }
+
+      Lock readLock = interner.getLockForLabelLookup(sample);
+      readLock.lock();
+
+      try {
+        // Check again whether sample is already present in the pool inside critical section.
+        if (inMemoryNodeEntry == null) {
+          inMemoryNodeEntry = nodeMap.get(packageIdentifier);
+        }
+
+        if (inMemoryNodeEntry != null) {
+          Label pooledInstance = getLabelFromInMemoryNodeEntry(inMemoryNodeEntry, sample);
+          if (pooledInstance != null) {
+            return pooledInstance;
+          }
+        }
+        return interner.weakIntern(sample);
+      } finally {
+        readLock.unlock();
+      }
+    }
+  }
+
+  @Nullable
+  private static Label getLabelFromInMemoryNodeEntry(
+      InMemoryNodeEntry inMemoryNodeEntry, Label sample) {
+    checkNotNull(inMemoryNodeEntry);
+    SkyValue value = inMemoryNodeEntry.toValue();
+    if (value == null) {
+      return null;
+    }
+    checkState(value instanceof PackageValue, value);
+    ImmutableSortedMap<String, Target> targets = ((PackageValue) value).getPackage().getTargets();
+    Target target = targets.get(sample.getName());
+    return target != null ? target.getLabel() : null;
   }
 }

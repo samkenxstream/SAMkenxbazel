@@ -27,6 +27,7 @@ import net.starlark.java.eval.EvalException;
 import net.starlark.java.eval.NoneType;
 import net.starlark.java.eval.Sequence;
 import net.starlark.java.eval.StarlarkCallable;
+import net.starlark.java.eval.StarlarkFunction;
 import net.starlark.java.eval.StarlarkThread;
 import net.starlark.java.eval.StarlarkValue;
 
@@ -35,9 +36,30 @@ import net.starlark.java.eval.StarlarkValue;
     name = "actions",
     category = DocCategory.BUILTIN,
     doc =
-        "Module providing functions to create actions. "
-            + "Access this module using <a href=\"ctx#actions\"><code>ctx.actions</code></a>.")
+        "Module providing functions to create actions. Access this module using <a"
+            + " href=\"../builtins/ctx.html#actions\"><code>ctx.actions</code></a>.")
 public interface StarlarkActionFactoryApi extends StarlarkValue {
+
+  static final String TRANSFORM_VERSION_FUNC_DOC =
+      "A Starlark callback method which takes <code>dict</code> as an input and  returns"
+          + " <code>dict</code> as an output. The input <code>dict</code> is generated"
+          + " from <a"
+          + " href='https://bazel.build/rules/lib/builtins/ctx#version_file'>ctx.version_file</a>."
+          + " The output <code>dict</code> needs to contain the user translated key-value"
+          + " pairs. Output <code>dict</code> will serve as a substitutions"
+          + " dictionary for template expansion.";
+  static final String TRANSFORM_INFO_FUNC_DOC =
+      "A Starlark callback method which takes <code>dict</code> as an input and  returns"
+          + " <code>dict</code> as an output. The input <code>dict</code> is generated"
+          + " from <a"
+          + " href='https://bazel.build/rules/lib/builtins/ctx#info_file'>ctx.info_file</a>,"
+          + " the output <code>dict</code> needs to contain the user translated key-value"
+          + " pairs. Output <code>dict</code> will serve as a substitutions"
+          + " dictionary for template expansion.";
+  static final String TEMPLATE_DOC =
+      "A <code>template</code> file according to which the output <code>dict</code> from"
+          + " <code>transform_func</code> will be formatted and written to a file.";
+  static final String OUTPUT_DOC = "Output of the action.";
 
   @StarlarkMethod(
       name = "declare_file",
@@ -52,7 +74,7 @@ public interface StarlarkActionFactoryApi extends StarlarkValue {
               + " href='https://bazel.build/extending/rules#files'>predeclared output files</a> do"
               + " not need to be (and cannot be) declared using this function. You can obtain their"
               + " <code>File</code> objects from <a"
-              + " href=\"ctx.html#outputs\"><code>ctx.outputs</code></a> instead. <a"
+              + " href=\"../builtins/ctx.html#outputs\"><code>ctx.outputs</code></a> instead. <a"
               + " href=\"https://github.com/bazelbuild/examples/tree/main/rules/computed_dependencies/hash.bzl\">See"
               + " example of use</a>.",
       parameters = {
@@ -84,7 +106,7 @@ public interface StarlarkActionFactoryApi extends StarlarkValue {
               + "current package. You must create an action that generates the directory. "
               + "The contents of the directory are not directly accessible from Starlark, "
               + "but can be expanded in an action command with "
-              + "<a href=\"Args.html#add_all\"><code>Args.add_all()</code></a>. "
+              + "<a href=\"../builtins/Args.html#add_all\"><code>Args.add_all()</code></a>. "
               + "Only regular files and directories can be in the expanded contents of a "
               + "declare_directory.",
       parameters = {
@@ -257,9 +279,9 @@ public interface StarlarkActionFactoryApi extends StarlarkValue {
               @ParamType(type = CommandLineArgsApi.class)
             },
             doc =
-                "the contents of the file. "
-                    + "May be a either a string or an "
-                    + "<a href=\"actions.html#args\"><code>actions.args()</code></a> object.",
+                "the contents of the file. May be a either a string or an <a"
+                    + " href=\"#args\"><code>actions.args()</code></a>"
+                    + " object.",
             named = true),
         @Param(
             name = "is_executable",
@@ -349,7 +371,7 @@ public interface StarlarkActionFactoryApi extends StarlarkValue {
             doc =
                 "Command line arguments of the action. "
                     + "Must be a list of strings or "
-                    + "<a href=\"actions.html#args\"><code>actions.args()</code></a> objects."),
+                    + "<a href=\"#args\"><code>actions.args()</code></a> objects."),
         @Param(
             name = "mnemonic",
             allowedTypes = {
@@ -551,7 +573,7 @@ public interface StarlarkActionFactoryApi extends StarlarkValue {
             positional = false,
             doc =
                 "Command line arguments of the action. Must be a list of strings or "
-                    + "<a href=\"actions.html#args\"><code>actions.args()</code></a> objects."
+                    + "<a href=\"#args\"><code>actions.args()</code></a> objects."
                     + ""
                     + "<p>Bazel passes the elements in this attribute as arguments to the command."
                     + "The command can access these arguments using shell variable substitutions "
@@ -590,7 +612,7 @@ public interface StarlarkActionFactoryApi extends StarlarkValue {
                     + "elements in <code>arguments</code> are made available to the command as "
                     + "<code>$1</code>, <code>$2</code> (or <code>%1</code>, <code>%2</code> if "
                     + "using Windows batch), etc. If <code>arguments</code> contains "
-                    + "any <a href=\"actions.html#args\"><code>actions.args()</code></a> objects, "
+                    + "any <a href=\"#args\"><code>actions.args()</code></a> objects, "
                     + "their contents are appended one by one to the command line, so "
                     + "<code>$</code><i>i</i> can refer to individual strings within an Args "
                     + "object. Note that if an Args object of unknown size is passed as part of "
@@ -818,4 +840,76 @@ public interface StarlarkActionFactoryApi extends StarlarkValue {
       useStarlarkThread = true)
   FileApi createShareableArtifact(String path, Object root, StarlarkThread thread)
       throws EvalException;
+
+  @StarlarkMethod(
+      name = "transform_version_file",
+      documented = false,
+      doc =
+          "Similar to <a href=\"#transform_info_file\">transform_info_file</a>, but transforms <a"
+              + " href='https://bazel.build/rules/lib/builtins/ctx#version_file'>ctx.version_file</a>.",
+      parameters = {
+        @Param(
+            name = "transform_func",
+            doc = TRANSFORM_VERSION_FUNC_DOC,
+            allowedTypes = {@ParamType(type = StarlarkFunction.class)},
+            positional = false,
+            named = true),
+        @Param(
+            name = "template",
+            doc = TEMPLATE_DOC,
+            allowedTypes = {@ParamType(type = FileApi.class)},
+            positional = false,
+            named = true),
+        @Param(
+            name = "output",
+            doc = OUTPUT_DOC,
+            allowedTypes = {@ParamType(type = FileApi.class)},
+            positional = false,
+            named = true),
+      },
+      useStarlarkThread = true)
+  void transformVersionFile(
+      Object transformFuncObject, Object templateObject, Object outputObject, StarlarkThread thread)
+      throws InterruptedException, EvalException;
+
+  @StarlarkMethod(
+      name = "transform_info_file",
+      documented = false,
+      doc =
+          "Transforms <a"
+              + " href='https://bazel.build/rules/lib/builtins/ctx#info_file'>ctx.info_file</a> to"
+              + " a language-consumable file and writes its contents to <code>output</code>. Keys"
+              + " and values are transformed by calling the <code>transform_func</code> Starlark"
+              + " method, and the output file format is generated according to the"
+              + " <code>template</code>. Use this call to create an action in an auxiliary rule."
+              + " Create a single target for an auxiliary rule which is then used as an implicit"
+              + " dependency for the main rule. Main rule is the one which needs the transformed"
+              + " <code>info_file</code>. The auxiliary rule should also declare"
+              + " <code>output</code> file to which transformed content is written. The"
+              + " <code>output</code> file is then provided to the dependant main rule. This will"
+              + " avoid action conflicts and duplicated file generations.",
+      parameters = {
+        @Param(
+            name = "transform_func",
+            doc = TRANSFORM_INFO_FUNC_DOC,
+            allowedTypes = {@ParamType(type = StarlarkFunction.class)},
+            positional = false,
+            named = true),
+        @Param(
+            name = "template",
+            doc = TEMPLATE_DOC,
+            allowedTypes = {@ParamType(type = FileApi.class)},
+            positional = false,
+            named = true),
+        @Param(
+            name = "output",
+            doc = OUTPUT_DOC,
+            allowedTypes = {@ParamType(type = FileApi.class)},
+            positional = false,
+            named = true),
+      },
+      useStarlarkThread = true)
+  void transformInfoFile(
+      Object transformFuncObject, Object templateObject, Object outputObject, StarlarkThread thread)
+      throws InterruptedException, EvalException;
 }

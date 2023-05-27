@@ -34,7 +34,6 @@ import com.github.benmanes.caffeine.cache.LoadingCache;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
-import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.Allowlist;
 import com.google.devtools.build.lib.analysis.BaseRuleClasses;
 import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
@@ -92,7 +91,6 @@ import com.google.devtools.build.lib.packages.TargetUtils;
 import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.skyframe.serialization.autocodec.SerializationConstant;
 import com.google.devtools.build.lib.starlarkbuildapi.StarlarkRuleFunctionsApi;
-import com.google.devtools.build.lib.util.FileType;
 import com.google.devtools.build.lib.util.FileTypeSet;
 import com.google.devtools.build.lib.util.Pair;
 import com.google.errorprone.annotations.FormatMethod;
@@ -117,7 +115,7 @@ import net.starlark.java.syntax.Identifier;
 import net.starlark.java.syntax.Location;
 
 /** A helper class to provide an easier API for Starlark rule definitions. */
-public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi<Artifact> {
+public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi {
   // A cache for base rule classes (especially tests).
   private static final LoadingCache<String, Label> labelCache =
       Caffeine.newBuilder().build(Label::parseCanonical);
@@ -154,7 +152,7 @@ public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi<Arti
           .build();
 
   /** Parent rule class for executable non-test Starlark rules. */
-  public static final RuleClass binaryBaseRule =
+  private static final RuleClass binaryBaseRule =
       new RuleClass.Builder("$binary_base_rule", RuleClassType.ABSTRACT, true, baseRule)
           .add(attr("args", STRING_LIST))
           .add(attr("output_licenses", LICENSE))
@@ -195,39 +193,39 @@ public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi<Arti
             // Input files for every test action
             .add(
                 attr("$test_wrapper", LABEL)
-                    .cfg(ExecutionTransitionFactory.create())
+                    .cfg(ExecutionTransitionFactory.createFactory())
                     .singleArtifact()
                     .value(labelCache.get(toolsRepository + "//tools/test:test_wrapper")))
             .add(
                 attr("$xml_writer", LABEL)
-                    .cfg(ExecutionTransitionFactory.create())
+                    .cfg(ExecutionTransitionFactory.createFactory())
                     .singleArtifact()
                     .value(labelCache.get(toolsRepository + "//tools/test:xml_writer")))
             .add(
                 attr("$test_runtime", LABEL_LIST)
-                    .cfg(ExecutionTransitionFactory.create())
+                    .cfg(ExecutionTransitionFactory.createFactory())
                     // Getting this default value through the getTestRuntimeLabelList helper ensures
                     // we reuse the same ImmutableList<Label> instance for each $test_runtime attr.
                     .value(getTestRuntimeLabelList(env)))
             .add(
                 attr("$test_setup_script", LABEL)
-                    .cfg(ExecutionTransitionFactory.create())
+                    .cfg(ExecutionTransitionFactory.createFactory())
                     .singleArtifact()
                     .value(labelCache.get(toolsRepository + "//tools/test:test_setup")))
             .add(
                 attr("$xml_generator_script", LABEL)
-                    .cfg(ExecutionTransitionFactory.create())
+                    .cfg(ExecutionTransitionFactory.createFactory())
                     .singleArtifact()
                     .value(labelCache.get(toolsRepository + "//tools/test:test_xml_generator")))
             .add(
                 attr("$collect_coverage_script", LABEL)
-                    .cfg(ExecutionTransitionFactory.create())
+                    .cfg(ExecutionTransitionFactory.createFactory())
                     .singleArtifact()
                     .value(labelCache.get(toolsRepository + "//tools/test:collect_coverage")))
             // Input files for test actions collecting code coverage
             .add(
                 attr(":coverage_support", LABEL)
-                    .cfg(ExecutionTransitionFactory.create())
+                    .cfg(ExecutionTransitionFactory.createFactory())
                     .value(
                         BaseRuleClasses.coverageSupportAttribute(
                             labelCache.get(
@@ -235,7 +233,7 @@ public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi<Arti
             // Used in the one-per-build coverage report generation action.
             .add(
                 attr(":coverage_report_generator", LABEL)
-                    .cfg(ExecutionTransitionFactory.create())
+                    .cfg(ExecutionTransitionFactory.createFactory())
                     .value(
                         BaseRuleClasses.coverageReportGeneratorAttribute(
                             labelCache.get(
@@ -296,7 +294,6 @@ public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi<Arti
       Object buildSetting,
       Object cfg,
       Object execGroups,
-      Object compileOneFiletype,
       Object name,
       StarlarkThread thread)
       throws EvalException {
@@ -308,7 +305,6 @@ public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi<Arti
         executable,
         outputToGenfiles,
         fragments,
-        hostFragments,
         starlarkTestable,
         toolchains,
         doc,
@@ -318,7 +314,6 @@ public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi<Arti
         buildSetting,
         cfg,
         execGroups,
-        compileOneFiletype,
         name,
         thread);
   }
@@ -331,7 +326,6 @@ public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi<Arti
       boolean executable,
       boolean outputToGenfiles,
       Sequence<?> fragments,
-      Sequence<?> hostFragments,
       boolean starlarkTestable,
       Sequence<?> toolchains,
       Object doc,
@@ -341,7 +335,6 @@ public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi<Arti
       Object buildSetting,
       Object cfg,
       Object execGroups,
-      Object compileOneFiletype,
       Object name,
       StarlarkThread thread)
       throws EvalException {
@@ -494,17 +487,6 @@ public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi<Arti
       builder.addExecutionPlatformConstraints(parseExecCompatibleWith(execCompatibleWith, thread));
     }
 
-    if (compileOneFiletype instanceof Sequence) {
-      if (!bzlModule.label().getRepository().getNameWithAt().equals("@_builtins")) {
-        throw Starlark.errorf(
-            "Rule in '%s' cannot use private API", bzlModule.label().getPackageName());
-      }
-      ImmutableList<String> filesTypes =
-          Sequence.cast(compileOneFiletype, String.class, "compile_one_filetype")
-              .getImmutableList();
-      builder.setPreferredDependencyPredicate(FileType.of(filesTypes));
-    }
-
     StarlarkRuleFunction starlarkRuleFunction =
         new StarlarkRuleFunction(
             builder,
@@ -644,12 +626,12 @@ public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi<Arti
       if (!Attribute.isImplicit(nativeName) && !Attribute.isLateBound(nativeName)) {
         if (attribute.getType() == Type.STRING) {
           // isValueSet() is always true for attr.string as default value is "" by default.
-          hasDefault = !Objects.equals(attribute.getDefaultValue(null), "");
+          hasDefault = !Objects.equals(attribute.getDefaultValue(), "");
         } else if (attribute.getType() == Type.INTEGER) {
           // isValueSet() is always true for attr.int as default value is 0 by default.
-          hasDefault = !Objects.equals(attribute.getDefaultValue(null), StarlarkInt.of(0));
+          hasDefault = !Objects.equals(attribute.getDefaultValue(), StarlarkInt.of(0));
         } else if (attribute.getType() == Type.BOOLEAN) {
-          hasDefault = !Objects.equals(attribute.getDefaultValue(null), false);
+          hasDefault = !Objects.equals(attribute.getDefaultValue(), false);
         } else {
           throw Starlark.errorf(
               "Aspect parameter attribute '%s' must have type 'bool', 'int' or 'string'.",
@@ -658,7 +640,7 @@ public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi<Arti
 
         if (hasDefault && attribute.checkAllowedValues()) {
           PredicateWithMessage<Object> allowed = attribute.getAllowedValues();
-          Object defaultVal = attribute.getDefaultValue(null);
+          Object defaultVal = attribute.getDefaultValue();
           if (!allowed.apply(defaultVal)) {
             throw Starlark.errorf(
                 "Aspect parameter attribute '%s' has a bad default value: %s",
@@ -824,7 +806,6 @@ public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi<Arti
             ruleClass,
             attributeValues,
             pkgContext.getEventHandler(),
-            thread.getSemantics(),
             thread.getCallStack());
       } catch (InvalidRuleException | NameConflictException e) {
         throw new EvalException(e);
@@ -1045,19 +1026,8 @@ public class StarlarkRuleClassFunctions implements StarlarkRuleFunctionsApi<Arti
 
   @Override
   public ExecGroup execGroup(
-      Sequence<?> toolchains,
-      Sequence<?> execCompatibleWith,
-      Boolean copyFromRule,
-      StarlarkThread thread)
+      Sequence<?> toolchains, Sequence<?> execCompatibleWith, StarlarkThread thread)
       throws EvalException {
-    if (copyFromRule) {
-      if (!toolchains.isEmpty() || !execCompatibleWith.isEmpty()) {
-        throw Starlark.errorf(
-            "An exec group cannot set copy_from_rule=True and declare toolchains or constraints.");
-      }
-      return ExecGroup.copyFromDefault();
-    }
-
     ImmutableSet<ToolchainTypeRequirement> toolchainTypes = parseToolchainTypes(toolchains, thread);
     ImmutableSet<Label> constraints = parseExecCompatibleWith(execCompatibleWith, thread);
     return ExecGroup.builder()

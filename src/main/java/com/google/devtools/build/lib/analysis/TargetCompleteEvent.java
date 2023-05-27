@@ -101,14 +101,6 @@ public final class TargetCompleteEvent
     }
 
     @Nullable
-    public Runfiles getRunfiles() {
-      if (runfilesSupport != null) {
-        return runfilesSupport.getRunfiles();
-      }
-      return null;
-    }
-
-    @Nullable
     public Artifact getExecutable() {
       return executable;
     }
@@ -159,7 +151,6 @@ public final class TargetCompleteEvent
       postedAfterBuilder.add(cause.getIdProto());
     }
     detailedExitCode = mostImportantDetailedExitCode;
-    this.postedAfter = postedAfterBuilder.build();
     this.completionContext = completionContext;
     this.outputs = outputs;
     this.isTest = isTest;
@@ -182,10 +173,12 @@ public final class TargetCompleteEvent
           instrumentedFilesProvider.getBaselineCoverageArtifacts();
       if (!baselineCoverageArtifacts.isEmpty()) {
         this.baselineCoverageArtifacts = baselineCoverageArtifacts;
+        postedAfterBuilder.add(BuildEventIdUtil.coverageActionsFinished());
       } else {
         this.baselineCoverageArtifacts = null;
       }
     }
+    this.postedAfter = postedAfterBuilder.build();
     this.tags = targetAndData.getRuleTags();
   }
 
@@ -303,10 +296,6 @@ public final class TargetCompleteEvent
   @Nullable
   public ArtifactsInOutputGroup getOutputGroup(String outputGroup) {
     return outputs.get(outputGroup);
-  }
-
-  public ImmutableMap<String, ArtifactsInOutputGroup> getOutputs() {
-    return outputs;
   }
 
   // TODO(aehlig): remove as soon as we managed to get rid of the deprecated "important_output"

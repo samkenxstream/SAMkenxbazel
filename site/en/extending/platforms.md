@@ -41,6 +41,9 @@ Bazel supports the following build scenarios regarding platforms:
 *  **Multi-platform builds** - host, execution, and target platforms are all
    different.
 
+Tip: for detailed instructions on migrating your project to platforms, see
+[Migrating to Platforms](/concepts/platforms).
+
 ## Defining constraints and platforms {:#constraints-platforms}
 
 The space of possible choices for platforms is defined by using the
@@ -70,7 +73,7 @@ workspace. They are referenced by label and subject to the usual visibility
 controls. If visibility allows, you can extend an existing constraint setting by
 defining your own value for it.
 
-The [`platform`](/reference/be/platform#platform) rule introduces a new platform with
+The [`platform`](/reference/be/platforms-and-toolchains#platform) rule introduces a new platform with
 certain choices of constraint values. The
 following creates a platform named `linux_x86`, and says that it describes any
 environment that runs a Linux operating system on an x86_64 architecture with a
@@ -172,6 +175,9 @@ ERROR: Target //:target_incompatible_with_myplatform is incompatible and cannot 
 FAILED: Build did NOT complete successfully
 ```
 
+Incompatible explicit targets are silently skipped if
+`--skip_incompatible_explicit_targets` is enabled.
+
 ### More expressive constraints {:#expressive-constraints}
 
 For more flexibility in expressing constraints, use the
@@ -220,14 +226,14 @@ cc_library(
     target_compatible_with = select({
         "@platforms//cpu:arm": ["@platforms//:incompatible"],
         "//conditions:default": [],
-    ],
+    }),
 )
 ```
 
 ### Detecting incompatible targets using `bazel cquery` {:#cquery-incompatible-target-detection}
 
 You can use the
-[`IncompatiblePlatformProvider`](/rules/lib/IncompatiblePlatformProvider)
+[`IncompatiblePlatformProvider`](/rules/lib/providers/IncompatiblePlatformProvider)
 in `bazel cquery`'s [Starlark output
 format](/query/cquery#output-format-definition) to distinguish
 incompatible targets from compatible ones.

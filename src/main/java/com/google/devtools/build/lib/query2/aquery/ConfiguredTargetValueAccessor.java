@@ -37,7 +37,6 @@ import com.google.devtools.build.lib.skyframe.SkyFunctions;
 import com.google.devtools.build.skyframe.SkyFunctionName;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.WalkableGraph;
-import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -162,10 +161,10 @@ public class ConfiguredTargetValueAccessor implements TargetAccessor<KeyedConfig
   }
 
   /** Returns the AspectValues that are attached to the given configuredTarget. */
-  public Collection<AspectValue> getAspectValues(
-      KeyedConfiguredTargetValue keyedConfiguredTargetValue) throws InterruptedException {
+  public Set<AspectValue> getAspectValues(KeyedConfiguredTargetValue keyedConfiguredTargetValue)
+      throws InterruptedException {
     Set<AspectValue> result = new HashSet<>();
-    SkyKey skyKey = configuredTargetKeyExtractor.extractKey(keyedConfiguredTargetValue);
+    SkyKey skyKey = configuredTargetKeyExtractor.extractKey(keyedConfiguredTargetValue).toKey();
     Iterable<SkyKey> revDeps =
         Iterables.concat(walkableGraph.getReverseDeps(ImmutableList.of(skyKey)).values());
     Label label = keyedConfiguredTargetValue.getConfiguredTarget().getLabel();

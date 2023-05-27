@@ -40,6 +40,7 @@ import com.google.devtools.build.lib.actions.FileArtifactValue;
 import com.google.devtools.build.lib.actions.FileArtifactValue.RemoteFileArtifactValue;
 import com.google.devtools.build.lib.actions.FileStateValue;
 import com.google.devtools.build.lib.actions.FileValue;
+import com.google.devtools.build.lib.actions.RemoteArtifactChecker;
 import com.google.devtools.build.lib.actions.ThreadStateReceiver;
 import com.google.devtools.build.lib.actions.util.ActionsTestUtil;
 import com.google.devtools.build.lib.actions.util.TestAction;
@@ -54,7 +55,6 @@ import com.google.devtools.build.lib.io.FileSymlinkCycleUniquenessFunction;
 import com.google.devtools.build.lib.io.FileSymlinkInfiniteExpansionUniquenessFunction;
 import com.google.devtools.build.lib.packages.WorkspaceFileValue;
 import com.google.devtools.build.lib.pkgcache.PathPackageLocator;
-import com.google.devtools.build.lib.skyframe.DirtinessCheckerUtils.BasicFilesystemDirtinessChecker;
 import com.google.devtools.build.lib.skyframe.ExternalFilesHelper.ExternalFileAction;
 import com.google.devtools.build.lib.skyframe.FilesystemValueChecker.ModifiedOutputsReceiver;
 import com.google.devtools.build.lib.skyframe.PackageFunction.GlobbingStrategy;
@@ -84,6 +84,7 @@ import com.google.devtools.build.lib.vfs.Symlinks;
 import com.google.devtools.build.lib.vfs.SyscallCache;
 import com.google.devtools.build.lib.vfs.inmemoryfs.InMemoryFileSystem;
 import com.google.devtools.build.skyframe.Differencer.Diff;
+import com.google.devtools.build.skyframe.Differencer.DiffWithDelta.Delta;
 import com.google.devtools.build.skyframe.EvaluationContext;
 import com.google.devtools.build.skyframe.EvaluationResult;
 import com.google.devtools.build.skyframe.InMemoryMemoizingEvaluator;
@@ -97,6 +98,7 @@ import com.google.devtools.build.skyframe.SkyValue;
 import com.google.testing.junit.testparameterinjector.TestParameter;
 import com.google.testing.junit.testparameterinjector.TestParameterInjector;
 import java.io.IOException;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -116,6 +118,8 @@ import org.mockito.ArgumentCaptor;
 /** Tests for {@link FilesystemValueChecker}. */
 @RunWith(TestParameterInjector.class)
 public final class FilesystemValueCheckerTest {
+  private static final RemoteArtifactChecker CHECK_TTL =
+      (file, metadata) -> metadata.isAlive(Instant.now());
   private static final int FSVC_THREADS_FOR_TEST = 200;
   private static final ActionLookupKey ACTION_LOOKUP_KEY =
       new ActionLookupKey() {
@@ -167,9 +171,9 @@ public final class FilesystemValueCheckerTest {
         derivedRoot.getExecPath().getRelative(derivedRoot.getRoot().relativize(outputPath)));
   }
 
-  private static ActionExecutionValue actionValueWithTreeArtifacts(List<TreeFileArtifact> contents)
+  private static Delta actionValueWithTreeArtifacts(List<TreeFileArtifact> contents)
       throws IOException {
-    return actionValueWithTreeArtifacts(contents, ImmutableList.of());
+    return Delta.justNew(actionValueWithTreeArtifacts(contents, ImmutableList.of()));
   }
 
   private static ActionExecutionValue actionValueWithTreeArtifacts(
@@ -189,10 +193,8 @@ public final class FilesystemValueCheckerTest {
     Map<Artifact, TreeArtifactValue> treeArtifactData = new HashMap<>();
     treeArtifacts.injectTo(treeArtifactData::put);
 
-    return ActionExecutionValue.createForTesting(
-        /* artifactData= */ ImmutableMap.of(),
-        ImmutableMap.copyOf(treeArtifactData),
-        /* outputSymlinks= */ null);
+    return ActionsTestUtil.createActionExecutionValue(
+        /* artifactData= */ ImmutableMap.of(), ImmutableMap.copyOf(treeArtifactData));
   }
 
   private static FileArtifactValue createMetadataFromFileSystem(Artifact artifact)
@@ -207,7 +209,7 @@ public final class FilesystemValueCheckerTest {
     return FileArtifactValue.createFromInjectedDigest(noDigest, path.getDigest());
   }
 
-  void writeFile(Path path, String... lines) throws IOException {
+  private void writeFile(Path path, String... lines) throws IOException {
     // Make sure we advance the clock to detect modifications which do not change the size, which
     // rely on ctime.
     fs.advanceClockMillis(1);
@@ -509,7 +511,7 @@ public final class FilesystemValueCheckerTest {
             valuesMap,
             batchStat.getBatchStat(fs),
             ModifiedFileSet.EVERYTHING_MODIFIED,
-            /* trustRemoteArtifacts= */ false,
+            RemoteArtifactChecker.IGNORE_ALL,
             (ignored, ignored2) -> {});
   }
 
@@ -767,19 +769,21 @@ public final class FilesystemValueCheckerTest {
 
     tsgm.setCommandStartTime();
     differencer.inject(
-        ImmutableMap.<SkyKey, SkyValue>of(
+        ImmutableMap.of(
             actionKey1,
-                actionValue(
-                    new TestAction(
-                        Runnables.doNothing(),
-                        NestedSetBuilder.emptySet(Order.STABLE_ORDER),
-                        ImmutableSet.of(out1))),
+                Delta.justNew(
+                    actionValue(
+                        new TestAction(
+                            Runnables.doNothing(),
+                            NestedSetBuilder.emptySet(Order.STABLE_ORDER),
+                            ImmutableSet.of(out1)))),
             actionKey2,
-                actionValue(
-                    new TestAction(
-                        Runnables.doNothing(),
-                        NestedSetBuilder.emptySet(Order.STABLE_ORDER),
-                        ImmutableSet.of(out2)))));
+                Delta.justNew(
+                    actionValue(
+                        new TestAction(
+                            Runnables.doNothing(),
+                            NestedSetBuilder.emptySet(Order.STABLE_ORDER),
+                            ImmutableSet.of(out2))))));
     assertThat(evaluator.evaluate(ImmutableList.of(), evaluationContext).hasError()).isFalse();
     assertThat(
             new FilesystemValueChecker(
@@ -788,7 +792,7 @@ public final class FilesystemValueCheckerTest {
                     evaluator.getValues(),
                     batchStatter,
                     ModifiedFileSet.EVERYTHING_MODIFIED,
-                    /* trustRemoteArtifacts= */ false,
+                    RemoteArtifactChecker.IGNORE_ALL,
                     (ignored, ignored2) -> {}))
         .isEmpty();
 
@@ -804,7 +808,7 @@ public final class FilesystemValueCheckerTest {
                     evaluator.getValues(),
                     batchStatter,
                     ModifiedFileSet.EVERYTHING_MODIFIED,
-                    /* trustRemoteArtifacts= */ false,
+                    RemoteArtifactChecker.IGNORE_ALL,
                     (ignored, ignored2) -> {}))
         .containsExactly(actionKey);
     assertThat(
@@ -813,7 +817,7 @@ public final class FilesystemValueCheckerTest {
                     evaluator.getValues(),
                     batchStatter,
                     ModifiedFileSet.EVERYTHING_DELETED,
-                    /* trustRemoteArtifacts= */ false,
+                    RemoteArtifactChecker.IGNORE_ALL,
                     (ignored, ignored2) -> {}))
         .containsExactly(actionKey);
     assertThat(
@@ -822,7 +826,7 @@ public final class FilesystemValueCheckerTest {
                     evaluator.getValues(),
                     batchStatter,
                     new ModifiedFileSet.Builder().modify(file.getExecPath()).build(),
-                    /* trustRemoteArtifacts= */ false,
+                    RemoteArtifactChecker.IGNORE_ALL,
                     (ignored, ignored2) -> {}))
         .containsExactly(actionKey);
     assertThat(
@@ -833,7 +837,7 @@ public final class FilesystemValueCheckerTest {
                     new ModifiedFileSet.Builder()
                         .modify(file.getExecPath().getParentDirectory())
                         .build(),
-                    /* trustRemoteArtifacts= */ false,
+                    RemoteArtifactChecker.IGNORE_ALL,
                     (ignored, ignored2) -> {}))
         .isEmpty();
     assertThat(
@@ -842,7 +846,7 @@ public final class FilesystemValueCheckerTest {
                     evaluator.getValues(),
                     batchStatter,
                     ModifiedFileSet.NOTHING_MODIFIED,
-                    /* trustRemoteArtifacts= */ false,
+                    RemoteArtifactChecker.IGNORE_ALL,
                     (ignored, ignored2) -> {}))
         .isEmpty();
   }
@@ -890,7 +894,7 @@ public final class FilesystemValueCheckerTest {
                 evaluator.getValues(),
                 batchStat.getBatchStat(fs),
                 modifiedSet.getModifiedFileSet(tree.getExecPath()),
-                /* trustRemoteArtifacts= */ false,
+                RemoteArtifactChecker.IGNORE_ALL,
                 mockModifiedOutputsReceiver);
 
     assertThat(dirtyActionKeys).isEmpty();
@@ -914,7 +918,7 @@ public final class FilesystemValueCheckerTest {
                 evaluator.getValues(),
                 batchStat.getBatchStat(fs),
                 modifiedSet.getModifiedFileSet(tree.getExecPath()),
-                /* trustRemoteArtifacts= */ false,
+                RemoteArtifactChecker.IGNORE_ALL,
                 mockModifiedOutputsReceiver);
 
     assertThat(dirtyActionKeys).containsExactly(actionKey);
@@ -941,7 +945,7 @@ public final class FilesystemValueCheckerTest {
                 evaluator.getValues(),
                 batchStat.getBatchStat(fs),
                 ModifiedFileSet.EVERYTHING_MODIFIED,
-                /* trustRemoteArtifacts= */ false,
+                RemoteArtifactChecker.IGNORE_ALL,
                 mockModifiedOutputsReceiver);
 
     assertThat(dirtyActionKeys).containsExactly(actionKey);
@@ -966,7 +970,7 @@ public final class FilesystemValueCheckerTest {
                 evaluator.getValues(),
                 batchStat.getBatchStat(fs),
                 modifiedSet.getModifiedFileSet(treeFile.getExecPath()),
-                /* trustRemoteArtifacts= */ false,
+                RemoteArtifactChecker.IGNORE_ALL,
                 mockModifiedOutputsReceiver);
 
     assertThat(dirtyActionKeys).containsExactly(actionKey);
@@ -992,7 +996,7 @@ public final class FilesystemValueCheckerTest {
                 evaluator.getValues(),
                 batchStat.getBatchStat(fs),
                 modifiedSet.getModifiedFileSet(newFile.getExecPath()),
-                /* trustRemoteArtifacts= */ false,
+                RemoteArtifactChecker.IGNORE_ALL,
                 mockModifiedOutputsReceiver);
 
     assertThat(dirtyActionValues).containsExactly(actionKey);
@@ -1017,7 +1021,7 @@ public final class FilesystemValueCheckerTest {
                 evaluator.getValues(),
                 batchStat.getBatchStat(fs),
                 modifiedSet.getModifiedFileSet(newFile.getExecPath()),
-                /* trustRemoteArtifacts= */ false,
+                RemoteArtifactChecker.IGNORE_ALL,
                 mockModifiedOutputsReceiver);
 
     assertThat(dirtyActionKeys).containsExactly(actionKey);
@@ -1042,7 +1046,7 @@ public final class FilesystemValueCheckerTest {
                 evaluator.getValues(),
                 batchStat.getBatchStat(fs),
                 modifiedSet.getModifiedFileSet(treeFile.getExecPath()),
-                /* trustRemoteArtifacts= */ false,
+                RemoteArtifactChecker.IGNORE_ALL,
                 mockModifiedOutputsReceiver);
 
     assertThat(dirtyActionKeys).containsExactly(actionKey);
@@ -1075,7 +1079,7 @@ public final class FilesystemValueCheckerTest {
                 evaluator.getValues(),
                 batchStat.getBatchStat(fs),
                 ModifiedFileSet.EVERYTHING_MODIFIED,
-                /* trustRemoteArtifacts= */ false,
+                RemoteArtifactChecker.IGNORE_ALL,
                 mockModifiedOutputsReceiver);
 
     assertThat(dirtyActionKeys).containsExactly(actionKey1, actionKey2);
@@ -1111,7 +1115,7 @@ public final class FilesystemValueCheckerTest {
                 ModifiedFileSet.builder()
                     .modify((reportFirst ? tree1File : tree2File).getExecPath())
                     .build(),
-                /* trustRemoteArtifacts= */ false,
+                RemoteArtifactChecker.IGNORE_ALL,
                 mockModifiedOutputsReceiver);
 
     assertThat(dirtyActionKeys).containsExactly(reportFirst ? actionKey1 : actionKey2);
@@ -1157,7 +1161,7 @@ public final class FilesystemValueCheckerTest {
                     .modify(treeAFile.getExecPath())
                     .modify(treeCFile.getExecPath())
                     .build(),
-                /* trustRemoteArtifacts= */ false,
+                RemoteArtifactChecker.IGNORE_ALL,
                 mockModifiedOutputsReceiver);
 
     assertThat(dirtyActionKeys).containsExactly(actionKey1, actionKey3);
@@ -1182,7 +1186,7 @@ public final class FilesystemValueCheckerTest {
                 evaluator.getValues(),
                 batchStat.getBatchStat(fs),
                 ModifiedFileSet.NOTHING_MODIFIED,
-                /* trustRemoteArtifacts= */ false,
+                RemoteArtifactChecker.IGNORE_ALL,
                 mockModifiedOutputsReceiver);
 
     assertThat(dirtyActionKeys).isEmpty();
@@ -1210,14 +1214,14 @@ public final class FilesystemValueCheckerTest {
 
   @Test
   // TODO(b/154337187): Remove the following annotation to re-enable once this test is de-flaked.
-  @Ignore
+  @Ignore("b/154337187")
   public void testDirtyActions() throws Exception {
     checkDirtyActions(null);
   }
 
   @Test
   // TODO(b/154337187): Remove the following annotation to re-enable once this test is de-flaked.
-  @Ignore
+  @Ignore("b/154337187")
   public void testDirtyActionsBatchStat() throws Exception {
     checkDirtyActions(
         new BatchStat() {
@@ -1238,7 +1242,7 @@ public final class FilesystemValueCheckerTest {
 
   @Test
   // TODO(b/154337187): Remove the following annotation to re-enable once this test is de-flaked.
-  @Ignore
+  @Ignore("b/154337187")
   public void testDirtyActionsBatchStatWithDigest() throws Exception {
     checkDirtyActions(
         new BatchStat() {
@@ -1258,7 +1262,7 @@ public final class FilesystemValueCheckerTest {
 
   @Test
   // TODO(b/154337187): Remove the following annotation to re-enable once this test is de-flaked.
-  @Ignore
+  @Ignore("b/154337187")
   public void testDirtyActionsBatchStatFallback() throws Exception {
     checkDirtyActions(
         new BatchStat() {
@@ -1292,22 +1296,19 @@ public final class FilesystemValueCheckerTest {
         throw new IllegalStateException(e);
       }
     }
-    return ActionExecutionValue.createForTesting(
-        ImmutableMap.copyOf(artifactData),
-        /* treeArtifactData= */ ImmutableMap.of(),
-        /* outputSymlinks= */ null);
+    return ActionsTestUtil.createActionExecutionValue(ImmutableMap.copyOf(artifactData));
   }
 
-  private static ActionExecutionValue actionValueWithTreeArtifact(
-      SpecialArtifact output, TreeArtifactValue tree) {
-    return ActionExecutionValue.createForTesting(
-        ImmutableMap.of(), ImmutableMap.of(output, tree), /* outputSymlinks= */ null);
+  private static Delta actionValueWithTreeArtifact(SpecialArtifact output, TreeArtifactValue tree) {
+    return Delta.justNew(
+        ActionsTestUtil.createActionExecutionValue(
+            /* artifactData= */ ImmutableMap.of(), ImmutableMap.of(output, tree)));
   }
 
-  private static ActionExecutionValue actionValueWithRemoteArtifact(
+  private static Delta actionValueWithRemoteArtifact(
       Artifact output, RemoteFileArtifactValue value) {
-    return ActionExecutionValue.createForTesting(
-        ImmutableMap.of(output, value), ImmutableMap.of(), /* outputSymlinks= */ null);
+    return Delta.justNew(
+        ActionsTestUtil.createActionExecutionValue(ImmutableMap.of(output, value)));
   }
 
   private RemoteFileArtifactValue createRemoteFileArtifactValue(String contents) {
@@ -1332,7 +1333,7 @@ public final class FilesystemValueCheckerTest {
 
     Artifact out1 = createDerivedArtifact("foo");
     Artifact out2 = createDerivedArtifact("bar");
-    Map<SkyKey, SkyValue> metadataToInject = new HashMap<>();
+    Map<SkyKey, Delta> metadataToInject = new HashMap<>();
     metadataToInject.put(
         actionKey1,
         actionValueWithRemoteArtifact(out1, createRemoteFileArtifactValue("foo-content")));
@@ -1359,7 +1360,7 @@ public final class FilesystemValueCheckerTest {
                     evaluator.getValues(),
                     /* batchStatter= */ null,
                     ModifiedFileSet.EVERYTHING_MODIFIED,
-                    /* trustRemoteArtifacts= */ true,
+                    RemoteArtifactChecker.TRUST_ALL,
                     (ignored, ignored2) -> {}))
         .isEmpty();
 
@@ -1373,7 +1374,7 @@ public final class FilesystemValueCheckerTest {
                     evaluator.getValues(),
                     /* batchStatter= */ null,
                     ModifiedFileSet.EVERYTHING_MODIFIED,
-                    /* trustRemoteArtifacts= */ true,
+                    RemoteArtifactChecker.TRUST_ALL,
                     (ignored, ignored2) -> {}))
         .containsExactly(actionKey1);
   }
@@ -1387,7 +1388,7 @@ public final class FilesystemValueCheckerTest {
 
     Artifact out1 = createDerivedArtifact("foo");
     Artifact out2 = createDerivedArtifact("bar");
-    Map<SkyKey, SkyValue> metadataToInject = new HashMap<>();
+    Map<SkyKey, Delta> metadataToInject = new HashMap<>();
     metadataToInject.put(
         actionKey1,
         actionValueWithRemoteArtifact(out1, createRemoteFileArtifactValue("foo-content")));
@@ -1414,7 +1415,7 @@ public final class FilesystemValueCheckerTest {
                     evaluator.getValues(),
                     /* batchStatter= */ null,
                     ModifiedFileSet.EVERYTHING_MODIFIED,
-                    /* trustRemoteArtifacts= */ true,
+                    RemoteArtifactChecker.TRUST_ALL,
                     (ignored, ignored2) -> {}))
         .isEmpty();
 
@@ -1428,7 +1429,7 @@ public final class FilesystemValueCheckerTest {
                     evaluator.getValues(),
                     /* batchStatter= */ null,
                     ModifiedFileSet.EVERYTHING_MODIFIED,
-                    /* trustRemoteArtifacts= */ true,
+                    RemoteArtifactChecker.TRUST_ALL,
                     (ignored, ignored2) -> {}))
         .containsExactly(actionKey1);
   }
@@ -1441,7 +1442,7 @@ public final class FilesystemValueCheckerTest {
 
     Artifact out1 = createDerivedArtifact("foo");
     Artifact out2 = createDerivedArtifact("bar");
-    Map<SkyKey, SkyValue> metadataToInject = new HashMap<>();
+    Map<SkyKey, Delta> metadataToInject = new HashMap<>();
     metadataToInject.put(
         actionKey1,
         actionValueWithRemoteArtifact(out1, createRemoteFileArtifactValue("foo-content")));
@@ -1469,7 +1470,7 @@ public final class FilesystemValueCheckerTest {
                     evaluator.getValues(),
                     /* batchStatter= */ null,
                     ModifiedFileSet.EVERYTHING_MODIFIED,
-                    /* trustRemoteArtifacts= */ true,
+                    CHECK_TTL,
                     (ignored, ignored2) -> {}))
         .containsExactly(actionKey2);
   }
@@ -1509,7 +1510,7 @@ public final class FilesystemValueCheckerTest {
                     evaluator.getValues(),
                     /* batchStatter= */ null,
                     ModifiedFileSet.EVERYTHING_MODIFIED,
-                    /* trustRemoteArtifacts= */ true,
+                    RemoteArtifactChecker.TRUST_ALL,
                     (ignored, ignored2) -> {}))
         .isEmpty();
 
@@ -1523,7 +1524,7 @@ public final class FilesystemValueCheckerTest {
                     evaluator.getValues(),
                     /* batchStatter= */ null,
                     ModifiedFileSet.EVERYTHING_MODIFIED,
-                    /* trustRemoteArtifacts= */ false,
+                    RemoteArtifactChecker.IGNORE_ALL,
                     (ignored, ignored2) -> {}))
         .containsExactly(actionKey);
   }
@@ -1563,7 +1564,7 @@ public final class FilesystemValueCheckerTest {
                     evaluator.getValues(),
                     /* batchStatter= */ null,
                     ModifiedFileSet.EVERYTHING_MODIFIED,
-                    /* trustRemoteArtifacts= */ true,
+                    RemoteArtifactChecker.TRUST_ALL,
                     (ignored, ignored2) -> {}))
         .isEmpty();
 
@@ -1578,7 +1579,7 @@ public final class FilesystemValueCheckerTest {
                     evaluator.getValues(),
                     /* batchStatter= */ null,
                     ModifiedFileSet.EVERYTHING_MODIFIED,
-                    /* trustRemoteArtifacts= */ true,
+                    RemoteArtifactChecker.TRUST_ALL,
                     (ignored, ignored2) -> {}))
         .containsExactly(actionKey);
   }
@@ -1617,7 +1618,7 @@ public final class FilesystemValueCheckerTest {
                     evaluator.getValues(),
                     /* batchStatter= */ null,
                     ModifiedFileSet.EVERYTHING_MODIFIED,
-                    /* trustRemoteArtifacts= */ true,
+                    CHECK_TTL,
                     (ignored, ignored2) -> {}))
         .containsExactly(actionKey);
   }
@@ -1660,7 +1661,7 @@ public final class FilesystemValueCheckerTest {
                     evaluator.getValues(),
                     /* batchStatter= */ null,
                     ModifiedFileSet.EVERYTHING_MODIFIED,
-                    /* trustRemoteArtifacts= */ true,
+                    CHECK_TTL,
                     (ignored, ignored2) -> {}))
         .containsExactly(actionKey);
   }
@@ -1757,6 +1758,7 @@ public final class FilesystemValueCheckerTest {
 
   private static Diff getDirtyFilesystemKeys(
       MemoizingEvaluator evaluator, FilesystemValueChecker checker) throws InterruptedException {
-    return checker.getDirtyKeys(evaluator.getValues(), new BasicFilesystemDirtinessChecker());
+    return checker.getDirtyKeys(
+        evaluator.getValues(), DirtinessCheckerUtils.createBasicFilesystemDirtinessChecker());
   }
 }

@@ -12,9 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Utilites related to C++ support."""
+"""Utilities related to C++ support."""
+
+load(":common/cc/cc_info.bzl", "CcInfo")
+load(":common/cc/cc_shared_library_hint_info.bzl", "CcSharedLibraryHintInfo")
 
 cc_common_internal = _builtins.internal.cc_common_internal_do_not_use
+CcNativeLibraryInfo = _builtins.internal.CcNativeLibraryInfo
 
 # buildifier: disable=name-conventions
 _UnboundValueProviderDoNotUse = provider("This provider is used as an unique symbol to distinguish between bound and unbound Starlark values, to avoid using kwargs.", fields = [])
@@ -30,7 +34,8 @@ _PRIVATE_STARLARKIFICATION_ALLOWLIST = [
     ("", "tools/build_defs/android"),
     ("", "third_party/bazel_rules/rules_android"),
     ("build_bazel_rules_android", ""),
-    ("", "third_party/bazel_rules/rules_rust/rust/private"),
+    ("rules_android", ""),
+    ("", "rust/private"),
     ("rules_rust", "rust/private"),
 ]
 
@@ -379,9 +384,29 @@ def _create_linking_context(
     )
 
 def _merge_cc_infos(*, direct_cc_infos = [], cc_infos = []):
-    return cc_common_internal.merge_cc_infos(
-        direct_cc_infos = direct_cc_infos,
-        cc_infos = cc_infos,
+    direct_cc_compilation_contexts = []
+    cc_compilation_contexts = []
+    cc_linking_contexts = []
+    cc_debug_info_contexts = []
+    transitive_native_cc_libraries = []
+
+    for cc_info in direct_cc_infos:
+        direct_cc_compilation_contexts.append(cc_info.compilation_context)
+        cc_linking_contexts.append(cc_info.linking_context)
+        cc_debug_info_contexts.append(cc_info.debug_context())
+        transitive_native_cc_libraries.append(cc_info.transitive_native_libraries())
+
+    for cc_info in cc_infos:
+        cc_compilation_contexts.append(cc_info.compilation_context)
+        cc_linking_contexts.append(cc_info.linking_context)
+        cc_debug_info_contexts.append(cc_info.debug_context())
+        transitive_native_cc_libraries.append(cc_info.transitive_native_libraries())
+
+    return CcInfo(
+        compilation_context = cc_common_internal.merge_compilation_contexts(compilation_contexts = direct_cc_compilation_contexts, non_exported_compilation_contexts = cc_compilation_contexts),
+        linking_context = cc_common_internal.merge_linking_contexts(linking_contexts = cc_linking_contexts),
+        debug_context = cc_common_internal.merge_debug_context(cc_debug_info_contexts),
+        cc_native_library_info = CcNativeLibraryInfo(libraries_to_link = depset(transitive = transitive_native_cc_libraries)),
     )
 
 def _create_compilation_context(
@@ -396,11 +421,15 @@ def _create_compilation_context(
         direct_textual_headers = [],
         direct_public_headers = [],
         direct_private_headers = [],
-        purpose = _UNBOUND):
-    if purpose != _UNBOUND:
+        purpose = _UNBOUND,
+        module_map = _UNBOUND):
+    if purpose != _UNBOUND or \
+       module_map != _UNBOUND:
         cc_common_internal.check_private_api(allowlist = _PRIVATE_STARLARKIFICATION_ALLOWLIST)
     if purpose == _UNBOUND:
         purpose = None
+    if module_map == _UNBOUND:
+        module_map = None
     return cc_common_internal.create_compilation_context(
         headers = headers,
         system_includes = system_includes,
@@ -413,6 +442,7 @@ def _create_compilation_context(
         direct_public_headers = direct_public_headers,
         direct_private_headers = direct_private_headers,
         purpose = purpose,
+        module_map = module_map,
     )
 
 def _legacy_cc_flags_make_variable_do_not_use(*, cc_toolchain):
@@ -831,4 +861,5 @@ cc_common = struct(
     create_compile_action = _create_compile_action,
     loose_hdrs_check_forbidden_by_allowlist = _loose_hdrs_check_forbidden_by_allowlist,
     implementation_deps_allowed_by_allowlist = _implementation_deps_allowed_by_allowlist,
+    CcSharedLibraryHintInfo = CcSharedLibraryHintInfo,
 )

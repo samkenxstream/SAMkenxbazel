@@ -17,9 +17,9 @@ import static com.google.common.truth.Truth.assertThat;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
+import com.google.devtools.build.lib.cmdline.PackageIdentifier;
 import com.google.devtools.build.skyframe.InMemoryGraphImpl.EdgelessInMemoryGraphImpl;
 import com.google.devtools.build.skyframe.QueryableGraph.Reason;
-import com.google.devtools.build.skyframe.SkyKey.SkyKeyPool;
 import org.junit.Test;
 
 /** Tests for {@link InMemoryGraphImpl}. */
@@ -38,7 +38,7 @@ public class InMemoryGraphTest extends GraphTest {
 
   @Override
   protected void makeGraph() {
-    graph = new InMemoryGraphImpl(/* usePooledSkyKeyInterning= */ true);
+    graph = new InMemoryGraphImpl();
   }
 
   @Override
@@ -54,7 +54,7 @@ public class InMemoryGraphTest extends GraphTest {
 
     @Override
     protected ProcessableGraph getGraph(Version version) {
-      return new EdgelessInMemoryGraphImpl(/* usePooledSkyKeyInterning= */ true);
+      return new EdgelessInMemoryGraphImpl(/* usePooledInterning= */ true);
     }
 
     @Override
@@ -120,12 +120,32 @@ public class InMemoryGraphTest extends GraphTest {
     graph.createIfAbsentBatch(null, Reason.OTHER, ImmutableList.of(cat));
     assertThat(graph.get(null, Reason.OTHER, cat)).isNotNull();
 
-    assertThat(graph).isInstanceOf(SkyKeyPool.class);
-    ((SkyKeyPool) graph).cleanupPool();
+    assertThat(graph).isInstanceOf(InMemoryGraphImpl.class);
+    ((InMemoryGraphImpl) graph).cleanupInterningPool();
 
     // When re-creating a cat SkyKeyWithSkyKeyInterner, we expect to get the original instance. Pool
     // cleaning up re-interns the cat instance back to the weak interner, and thus, no new instance
     // is created.
     assertThat(SkyKeyWithSkyKeyInterner.create("cat")).isSameInstanceAs(cat);
+  }
+
+  @Test
+  public void removePackageNode_notPresentInGraph() throws Exception {
+    PackageIdentifier packageIdentifier = PackageIdentifier.createUnchecked("repo", "hello");
+
+    graph.remove(packageIdentifier);
+    assertThat(graph.get(null, Reason.OTHER, packageIdentifier)).isNull();
+  }
+
+  @Test
+  public void removePackageNode_noValueWeakInternLabelsNoCrash() throws Exception {
+    PackageIdentifier packageIdentifier = PackageIdentifier.createUnchecked("repo", "hello");
+
+    graph.createIfAbsentBatch(null, Reason.OTHER, ImmutableList.of(packageIdentifier));
+    NodeEntry entry = graph.get(null, Reason.OTHER, packageIdentifier);
+    assertThat(entry.toValue()).isNull();
+
+    graph.remove(packageIdentifier);
+    assertThat(graph.get(null, Reason.OTHER, packageIdentifier)).isNull();
   }
 }

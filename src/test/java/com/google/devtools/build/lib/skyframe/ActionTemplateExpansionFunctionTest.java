@@ -64,6 +64,7 @@ import com.google.devtools.build.lib.testutil.FoundationTestCase;
 import com.google.devtools.build.lib.util.Fingerprint;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.Root;
+import com.google.devtools.build.skyframe.Differencer.DiffWithDelta.Delta;
 import com.google.devtools.build.skyframe.EvaluationContext;
 import com.google.devtools.build.skyframe.EvaluationResult;
 import com.google.devtools.build.skyframe.InMemoryMemoizingEvaluator;
@@ -368,7 +369,7 @@ public final class ActionTemplateExpansionFunctionTest extends FoundationTestCas
   private ImmutableList<Action> evaluate(ActionTemplate<?> actionTemplate) throws Exception {
     ActionLookupValue ctValue = createActionLookupValue(actionTemplate);
 
-    differencer.inject(CTKEY, ctValue);
+    differencer.inject(CTKEY, Delta.justNew(ctValue));
     ActionTemplateExpansionKey templateKey = ActionTemplateExpansionValue.key(CTKEY, 0);
     EvaluationContext evaluationContext =
         EvaluationContext.newBuilder()
@@ -500,6 +501,11 @@ public final class ActionTemplateExpansionFunctionTest extends FoundationTestCas
     @Override
     public NestedSet<Artifact> getInputs() {
       return NestedSetBuilder.create(Order.STABLE_ORDER, inputTreeArtifact);
+    }
+
+    @Override
+    public NestedSet<Artifact> getSchedulingDependencies() {
+      return NestedSetBuilder.emptySet(Order.STABLE_ORDER);
     }
 
     @Override

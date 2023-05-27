@@ -73,11 +73,13 @@ command line. Specifically, `deps` becomes:
 targets. By using `select()` in a configurable attribute, the attribute
 effectively adopts different values when different conditions hold.
 
-Matches must be unambiguous: either exactly one condition must match or, if
-multiple conditions match, one's `values` must be a strict superset of all
-others'. For example, `values = {"cpu": "x86", "compilation_mode": "dbg"}` is an
-unambiguous specialization of `values = {"cpu": "x86"}`. The built-in condition
-[`//conditions:default`](#default-condition) automatically matches when
+Matches must be unambiguous: if multiple conditions match then either
+*  They all resolve to the same value. For example, when running on linux x86, this is unambiguous
+   `{"@platforms//os:linux": "Hello", "@platforms//cpu:x86_64": "Hello"}` because both branches resolve to "hello".
+*  One's `values` is a strict superset of all others'. For example, `values = {"cpu": "x86", "compilation_mode": "dbg"}`
+   is an unambiguous specialization of `values = {"cpu": "x86"}`.
+
+The built-in condition [`//conditions:default`](#default-condition) automatically matches when
 nothing else does.
 
 While this example uses `deps`, `select()` works just as well on `srcs`,
@@ -518,7 +520,7 @@ Unlike `selects.with_or`, different targets can share `:config1_or_2` across
 different attributes.
 
 It's an error for multiple conditions to match unless one is an unambiguous
-"specialization" of the others. See [here](#configurable-build-example) for details.
+"specialization" of the others or they all resolve to the same value. See [here](#configurable-build-example) for details.
 
 ## AND chaining {:#and-chaining}
 
@@ -745,7 +747,7 @@ my_custom_bazel_rule(
     name = "happy_rule",
     my_config_string = select({
         "//tools/target_cpu:x86": "first string",
-        "//tools/target_cpu:ppc": "second string",
+        "//third_party/bazel_platforms/cpu:ppc": "second string",
     }),
 )
 
@@ -758,7 +760,7 @@ my_custom_bazel_macro(
     name = "sad_macro",
     my_config_string = select({
         "//tools/target_cpu:x86": "first string",
-        "//tools/target_cpu:ppc": "other string",
+        "//third_party/bazel_platforms/cpu:ppc": "other string",
     }),
 )
 ```
@@ -840,7 +842,7 @@ load("//myapp:defs.bzl", "my_boolean_macro")
 my_boolean_macro(
     boolval = select({
         "//tools/target_cpu:x86": True,
-        "//tools/target_cpu:ppc": False,
+        "//third_party/bazel_platforms/cpu:ppc": False,
     }),
 )
 

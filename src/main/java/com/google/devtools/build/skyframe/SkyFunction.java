@@ -13,6 +13,8 @@
 // limitations under the License.
 package com.google.devtools.build.skyframe;
 
+import static com.google.common.base.Preconditions.checkState;
+
 import com.google.common.base.Preconditions;
 import com.google.common.graph.GraphBuilder;
 import com.google.common.graph.ImmutableGraph;
@@ -21,6 +23,7 @@ import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
 import com.google.devtools.build.lib.events.ExtendedEventHandler;
 import com.google.devtools.build.lib.events.Reportable;
 import com.google.errorprone.annotations.CanIgnoreReturnValue;
+import java.io.IOException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import javax.annotation.Nullable;
@@ -81,6 +84,19 @@ public interface SkyFunction {
    */
   @Nullable
   default String extractTag(SkyKey skyKey) {
+    return null;
+  }
+
+  /**
+   * Returns the max transitive source version that would be injected via {@link
+   * SkyFunctionEnvironment#injectVersionForNonHermeticFunction} if {@link #compute(SkyKey,
+   * Environment)} were invoked for the given {@link SkyKey}/{@link SkyValue} pair, or null if no
+   * call for version injection would be made.
+   */
+  @Nullable
+  default Version getMaxTransitiveSourceVersionToInjectForNonHermeticFunction(
+      SkyKey skyKey, SkyValue skyValue) throws IOException {
+    checkState(skyKey.functionName().getHermeticity() == FunctionHermeticity.HERMETIC);
     return null;
   }
 
@@ -318,10 +334,6 @@ public interface SkyFunction {
      * <p>Such a SkyFunction cannot unconditionally return a value, since in --nokeep_going mode it
      * may be called upon to transform a lower-level exception. This method can tell it whether to
      * transform a dependency's exception or ignore it and return a value as usual.
-     *
-     * <p>An exception is with {@link
-     * com.google.devtools.build.lib.skyframe.BuildDriverFunction#checkActionConflicts}. See the
-     * documentation at the method for more details.
      */
     boolean inErrorBubblingForSkyFunctionsThatCanFullyRecoverFromErrors();
 
@@ -361,7 +373,23 @@ public interface SkyFunction {
      *
      * <p>See the javadoc of {@link #getState} for motivation and an example.
      */
-    interface SkyKeyComputeState {}
+    interface SkyKeyComputeState extends AutoCloseable {
+      /**
+       * {@inheritDoc}
+       *
+       * <p>Can be overridden to make sure {@link SkyKeyComputeState} objects are cleaned up. Note
+       * that, while this ostensibly opens up the possibility for {@link SkyKeyComputeState} to hold
+       * on to any kind of external resource, doing so might still be dangerous as we only actively
+       * drop {@link SkyKeyComputeState} objects on high memory pressure. If the external resource
+       * being held on to is approaching starvation, we currently don't do anything to alleviate
+       * that pressure. So think *hard* before you start doing that!
+       *
+       * <p>Note also that this method should not perform any heavy work (especially blocking
+       * operations).
+       */
+      @Override
+      default void close() {}
+    }
 
     /**
      * Canonical type-safe heterogeneous container for use with {@link #getState} in SkyFunction
@@ -440,6 +468,9 @@ public interface SkyFunction {
      * exact instance used on the previous call to this method for the same {@link SkyKey}. The
      * above example was just illustrating the best-case outcome. Therefore, {@link SkyFunction}
      * implementations should make use of this feature only as a performance optimization.
+     *
+     * <p>Note that {@link SkyKeyComputeState#close()} allows us to hold on to other kinds of
+     * external resources and clean them up when necessary, but see the Javadoc there for caveats.
      *
      * <p>A notable example of the above note is that if {@link #compute} returns a {@link Restart}
      * then a call to {@link #getState} on the subsequent call to {@link #compute} will definitely

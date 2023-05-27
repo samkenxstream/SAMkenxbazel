@@ -53,6 +53,7 @@ import com.google.devtools.build.lib.analysis.starlark.StarlarkTransition.Transi
 import com.google.devtools.build.lib.analysis.util.AnalysisMock;
 import com.google.devtools.build.lib.analysis.util.AnalysisTestUtil;
 import com.google.devtools.build.lib.analysis.util.AnalysisTestUtil.DummyWorkspaceStatusActionContext;
+import com.google.devtools.build.lib.authandtls.credentialhelper.CredentialModule;
 import com.google.devtools.build.lib.bazel.BazelRepositoryModule;
 import com.google.devtools.build.lib.bugreport.BugReport;
 import com.google.devtools.build.lib.bugreport.BugReporter;
@@ -105,6 +106,7 @@ import com.google.devtools.build.lib.skyframe.ConfiguredTargetAndData;
 import com.google.devtools.build.lib.skyframe.PrecomputedValue;
 import com.google.devtools.build.lib.skyframe.PrecomputedValue.Injected;
 import com.google.devtools.build.lib.skyframe.SkyframeExecutor;
+import com.google.devtools.build.lib.skyframe.SkymeldModule;
 import com.google.devtools.build.lib.skyframe.util.SkyframeExecutorTestUtils;
 import com.google.devtools.build.lib.standalone.StandaloneModule;
 import com.google.devtools.build.lib.testutil.TestConstants;
@@ -302,6 +304,9 @@ public abstract class BuildIntegrationTestCase {
   }
 
   protected void createRuntimeWrapper() throws Exception {
+    if (runtimeWrapper != null) {
+      cleanupInterningPools();
+    }
     runtimeWrapper =
         new BlazeRuntimeWrapper(
             events,
@@ -348,6 +353,11 @@ public abstract class BuildIntegrationTestCase {
   protected void runPriorToBeforeMethods() throws Exception {
     // Allows tests such as SkyframeIntegrationInvalidationTest to execute code before all @Before
     // methods are being run.
+  }
+
+  @After
+  public final void cleanupInterningPools() {
+    getSkyframeExecutor().getEvaluator().cleanupInterningPools();
   }
 
   @After
@@ -561,7 +571,9 @@ public abstract class BuildIntegrationTestCase {
             .addBlazeModule(new BuildIntegrationTestCommandsModule())
             .addBlazeModule(new OutputFilteringModule())
             .addBlazeModule(connectivityModule)
-            .addBlazeModule(getMockBazelRepositoryModule());
+            .addBlazeModule(new SkymeldModule())
+            .addBlazeModule(getMockBazelRepositoryModule())
+            .addBlazeModule(new CredentialModule());
     getSpawnModules().forEach(builder::addBlazeModule);
     builder
         .addBlazeModule(getBuildInfoModule())
@@ -604,8 +616,6 @@ public abstract class BuildIntegrationTestCase {
     runtimeWrapper.addOptions(TestConstants.PRODUCT_SPECIFIC_FLAGS);
     // TODO(rosica): Remove this once g3 is migrated.
     runtimeWrapper.addOptions("--noincompatible_use_specific_tool_files");
-    // TODO(rosica): Remove this once g3 is migrated.
-    runtimeWrapper.addOptions("--noincompatible_make_thinlto_command_lines_standalone");
   }
 
   protected void resetOptions() {

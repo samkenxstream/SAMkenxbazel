@@ -14,6 +14,7 @@
 
 package com.google.devtools.build.lib.starlarkbuildapi.cpp;
 
+import com.google.devtools.build.docgen.annot.DocCategory;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.Depset;
 import com.google.devtools.build.lib.packages.semantics.BuildLanguageOptions;
@@ -39,6 +40,7 @@ import net.starlark.java.eval.Tuple;
 /** Utilites related to C++ support. */
 @StarlarkBuiltin(
     name = "cc_common_internal_do_not_use",
+    category = DocCategory.TOP_LEVEL_MODULE,
     doc = "Utilities for C++ compilation, linking, and command line generation.")
 public interface CcModuleApi<
         StarlarkActionFactoryT extends StarlarkActionFactoryApi,
@@ -182,6 +184,9 @@ public interface CcModuleApi<
             name = "grep_includes",
             positional = false,
             named = true,
+            doc =
+                "DO NOT USE - DEPRECATED. grep_includes is now part of cc_toolchain and there is no"
+                    + " need to specify it from the rule itself.",
             defaultValue = "None",
             allowedTypes = {
               @ParamType(type = FileApi.class),
@@ -866,7 +871,7 @@ public interface CcModuleApi<
         @Param(
             name = "must_keep_debug",
             doc =
-                "When set to True, bazel will expose 'strip_debug_symbols' variable, which is "
+                "When set to False, bazel will expose 'strip_debug_symbols' variable, which is "
                     + "usually used to use the linker to strip debug symbols from the output file.",
             named = true,
             positional = false,
@@ -1157,34 +1162,6 @@ public interface CcModuleApi<
       throws EvalException, InterruptedException;
 
   @StarlarkMethod(
-      name = "merge_cc_infos",
-      doc = "Merges multiple <code>CcInfo</code>s into one.",
-      parameters = {
-        @Param(
-            name = "direct_cc_infos",
-            doc =
-                "List of <code>CcInfo</code>s to be merged, whose headers will be exported by "
-                    + "the direct fields in the returned provider.",
-            positional = false,
-            named = true,
-            defaultValue = "[]"),
-        @Param(
-            name = "cc_infos",
-            doc =
-                "List of <code>CcInfo</code>s to be merged, whose headers will not be exported "
-                    + "by the direct fields in the returned provider.",
-            positional = false,
-            named = true,
-            defaultValue = "[]")
-      },
-      useStarlarkThread = true)
-  CcInfoApi<FileT> mergeCcInfos(
-      Sequence<?> directCcInfos, // <CcInfoApi> expected
-      Sequence<?> ccInfos, // <CcInfoApi> expected
-      StarlarkThread thread)
-      throws EvalException;
-
-  @StarlarkMethod(
       name = "create_compilation_context",
       doc = "Creates a <code>CompilationContext</code>.",
       useStarlarkThread = true,
@@ -1267,6 +1244,12 @@ public interface CcModuleApi<
             positional = false,
             named = true,
             defaultValue = "unbound"),
+        @Param(
+            name = "module_map",
+            documented = false,
+            positional = false,
+            named = true,
+            defaultValue = "unbound"),
       })
   CompilationContextT createCcCompilationContext(
       Object headers,
@@ -1280,6 +1263,7 @@ public interface CcModuleApi<
       Sequence<?> directPublicHdrs,
       Sequence<?> directPrivateHdrs,
       Object purpose,
+      Object moduleMap,
       StarlarkThread thread)
       throws EvalException;
 
@@ -1610,6 +1594,9 @@ public interface CcModuleApi<
             positional = false,
             named = true,
             defaultValue = "None",
+            doc =
+                "DO NOT USE - DEPRECATED. grep_includes is now part of cc_toolchain and there is no"
+                    + " need to specify it from the rule itself.",
             allowedTypes = {@ParamType(type = FileApi.class), @ParamType(type = NoneType.class)}),
         @Param(
             name = "variables_extension",
@@ -1743,9 +1730,21 @@ public interface CcModuleApi<
             positional = false,
             named = true,
             defaultValue = "[]"),
+        // There is an inconsistency in naming compilation_context parameter of this method
+        // should be named - exported_compilation_contexts and non_exported_compilation_contexts
+        // should be named compilation_contexts. Because compilation_contexts is already
+        // mistakenly named(cl/373784770) I've decided to go with the non_exported
+        // prefix to keep things consistent.
+        @Param(
+            name = "non_exported_compilation_contexts",
+            documented = false,
+            positional = false,
+            named = true,
+            defaultValue = "[]"),
       })
   CompilationContextT mergeCompilationContexts(
       Sequence<?> compilationContexts, // <CcCompilationContextApi> expected
+      Sequence<?> nonExportedCompilationContexts, // <CcCompilationContextApi> expected
       StarlarkThread thread)
       throws EvalException;
 

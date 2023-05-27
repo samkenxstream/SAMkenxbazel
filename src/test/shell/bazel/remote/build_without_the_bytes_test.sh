@@ -241,7 +241,7 @@ EOF
     --genrule_strategy=remote \
     --remote_executor=grpc://localhost:${worker_port} \
     --remote_download_toplevel \
-    //a:foobar || fail "Failed to build //a:foobar"
+    //a:foobar >& $TEST_log || fail "Failed to build //a:foobar"
 
   (! [[ -f bazel-bin/a/foo.txt ]]) \
   || fail "Expected intermediate output bazel-bin/a/foo.txt to not be downloaded"
@@ -249,6 +249,14 @@ EOF
   [[ -f bazel-bin/a/foobar.txt ]] \
   || fail "Expected toplevel output bazel-bin/a/foobar.txt to be downloaded"
 
+  bazel build \
+    --genrule_strategy=remote \
+    --remote_executor=grpc://localhost:${worker_port} \
+    --remote_download_toplevel \
+    //a:foobar >& $TEST_log || fail "Failed to build //a:foobar"
+
+  # Nothing changed, no action is re-executed.
+  expect_log "1 process: 1 internal."
 
   # Delete the file to test that the toplevel output can be re-downloaded
   rm -f bazel-bin/a/foobar.txt
@@ -259,7 +267,8 @@ EOF
     --remote_download_toplevel \
     //a:foobar >& $TEST_log || fail "Failed to build //a:foobar"
 
-  expect_log "1 process: 1 internal"
+  # Output of foobar is missing, the generating action is re-executed
+  expect_log "2 processes: 1 remote cache hit, 1 internal."
 
   [[ -f bazel-bin/a/foobar.txt ]] \
   || fail "Expected toplevel output bazel-bin/a/foobar.txt to be re-downloaded"
@@ -267,7 +276,7 @@ EOF
 
 function test_downloads_toplevel_change_toplevel_targets() {
   # Test that if a second invocation changes toplevel targets, the outputs of
-  # new target will be downloaded even if we hit a skyframe cache.
+  # new target will be downloaded.
   mkdir -p a
   cat > a/BUILD <<'EOF'
 genrule(
@@ -301,7 +310,8 @@ EOF
     --remote_download_toplevel \
     //a:foo >& $TEST_log || fail "Failed to build //a:foobar"
 
-  expect_log "1 process: 1 internal"
+  # Output of foo is missing, the generating action is re-executed
+  expect_log "2 processes: 1 remote cache hit, 1 internal."
 
   [[ -f bazel-bin/a/foo.txt ]] \
     || fail "Expected toplevel output bazel-bin/a/foo.txt to be downloaded"
@@ -360,7 +370,7 @@ EOF
 # Test that --remote_download_toplevel fetches inputs to symlink actions. In
 # particular, cc_binary links against a symlinked imported .so file, and only
 # the symlink is in the runfiles.
-function test_downloads_toplevel_symlinks() {
+function test_downloads_toplevel_symlink_action() {
   if [[ "$PLATFORM" == "darwin" ]]; then
     # TODO(b/37355380): This test is disabled due to RemoteWorker not supporting
     # setting SDKROOT and DEVELOPER_DIR appropriately, as is required of
@@ -409,25 +419,60 @@ EOF
   ./bazel-bin/a/foo${EXE_EXT} || fail "bazel-bin/a/foo${EXE_EXT} failed to run"
 }
 
-function test_symlink_outputs_not_allowed_with_minimial() {
-  mkdir -p a
-  cat > a/input.txt <<'EOF'
-Input file
-EOF
-  cat > a/BUILD <<'EOF'
-genrule(
-  name = "foo",
-  srcs = ["input.txt"],
-  outs = ["output.txt", "output_symlink"],
-  cmd = "cp $< $(location :output.txt) && ln -s output.txt $(location output_symlink)",
+function setup_symlink_output() {
+  mkdir -p pkg
+
+  cat > pkg/defs.bzl <<EOF
+def _impl(ctx):
+  sym = ctx.actions.declare_symlink(ctx.label.name)
+  ctx.actions.run_shell(
+    outputs = [sym],
+    command = "ln -s {} {}".format(ctx.attr.target, sym.path),
+  )
+  return DefaultInfo(files = depset([sym]))
+
+symlink = rule(
+  implementation = _impl,
+  attrs = {
+    "target": attr.string(),
+  },
 )
 EOF
+
+  cat > pkg/BUILD <<EOF
+load(":defs.bzl", "symlink")
+symlink(
+  name = "sym",
+  target = "target.txt",
+)
+EOF
+}
+
+function test_downloads_toplevel_non_dangling_symlink_output() {
+  setup_symlink_output
+  touch pkg/target.txt
+
+  bazel build \
+    --remote_executor=grpc://localhost:${worker_port} \
+    --remote_download_toplevel \
+    //pkg:sym >& $TEST_log || fail "Expected build of //pkg:sym to succeed"
+
+  if [[ "$(readlink bazel-bin/pkg/sym)" != "target.txt" ]]; then
+    fail "Expected bazel-bin/pkg/sym to be a symlink pointing to target.txt"
+  fi
+}
+
+function test_downloads_toplevel_dangling_symlink_output() {
+  setup_symlink_output
 
   bazel build \
     --remote_executor=grpc://localhost:${worker_port} \
     --remote_download_minimal \
-    //a:foo >& $TEST_log && fail "Expected failure to build //a:foo"
-  expect_log "Symlinks in action outputs are not yet supported"
+    //pkg:sym >& $TEST_log || fail "Expected build of //pkg:sym to succeed"
+
+  if [[ "$(readlink bazel-bin/pkg/sym)" != "target.txt" ]]; then
+    fail "Expected bazel-bin/pkg/sym to be a symlink pointing to target.txt"
+  fi
 }
 
 # Regression test that --remote_download_toplevel does not crash when the
@@ -1576,7 +1621,8 @@ EOF
     //a:test >& $TEST_log || fail "Failed to build"
 
   [[ -e "bazel-bin/a/liblib.jar" ]] || fail "bazel-bin/a/liblib.jar file does not exist!"
-  [[ ! -e "bazel-bin/a/liblib.jdeps" ]] || fail "bazel-bin/a/liblib.jdeps shouldn't exist"
+  # TODO(chiwang): Don't download all outputs files of an action if only some of them are requested
+  #[[ ! -e "bazel-bin/a/liblib.jdeps" ]] || fail "bazel-bin/a/liblib.jdeps shouldn't exist"
 }
 
 function test_bazel_run_with_minimal() {
@@ -1683,6 +1729,157 @@ end_of_record"
   expect_log "$expected_result"
   cat bazel-out/_coverage/_coverage_report.dat > $TEST_log
   expect_log "$expected_result"
+}
+
+function test_remote_cache_eviction_retries() {
+  mkdir -p a
+
+  cat > a/BUILD <<'EOF'
+genrule(
+  name = 'foo',
+  srcs = ['foo.in'],
+  outs = ['foo.out'],
+  cmd = 'cat $(SRCS) > $@',
+)
+
+genrule(
+  name = 'bar',
+  srcs = ['foo.out', 'bar.in'],
+  outs = ['bar.out'],
+  cmd = 'cat $(SRCS) > $@',
+  tags = ['no-remote-exec'],
+)
+EOF
+
+  echo foo > a/foo.in
+  echo bar > a/bar.in
+
+  # Populate remote cache
+  bazel build \
+      --remote_executor=grpc://localhost:${worker_port} \
+      --remote_download_minimal \
+      //a:bar >& $TEST_log || fail "Failed to build"
+
+  bazel clean
+
+  # Clean build, foo.out isn't downloaded
+  bazel build \
+      --remote_executor=grpc://localhost:${worker_port} \
+      --remote_download_minimal \
+      //a:bar >& $TEST_log || fail "Failed to build"
+
+  if [[ -f bazel-bin/a/foo.out ]]; then
+    fail "Expected intermediate output bazel-bin/a/foo.out to not be downloaded"
+  fi
+
+  # Evict blobs from remote cache
+  stop_worker
+  start_worker
+
+  echo "updated bar" > a/bar.in
+
+  # Incremental build triggers remote cache eviction error but Bazel
+  # automatically retries the build and reruns the generating actions for
+  # missing blobs
+  bazel build \
+      --remote_executor=grpc://localhost:${worker_port} \
+      --remote_download_minimal \
+      --experimental_remote_cache_eviction_retries=5 \
+      //a:bar >& $TEST_log || fail "Failed to build"
+
+  expect_log "Found remote cache eviction error, retrying the build..."
+}
+
+function test_download_toplevel_symlinks_runfiles() {
+    cat > rules.bzl <<EOF
+def _symlink_rule_impl(ctx):
+    file = ctx.actions.declare_file("file.txt")
+    executable = ctx.actions.declare_file("executable")
+
+    ctx.actions.run_shell(
+        outputs = [file],
+        command = "echo 'Hello World!' > " + file.path,
+    )
+    ctx.actions.write(executable, "[[ -L symlink.txt ]] && cat symlink.txt")
+    return [DefaultInfo(
+        runfiles = ctx.runfiles(
+            symlinks = {"symlink.txt": file},
+        ),
+        executable = executable,
+    )]
+
+symlink_rule = rule(
+    implementation = _symlink_rule_impl,
+    executable = True,
+    attrs = {},
+)
+EOF
+  cat > BUILD <<EOF
+load(":rules.bzl", "symlink_rule")
+symlink_rule(name = "symlink")
+EOF
+
+  bazel run \
+    --remote_executor=grpc://localhost:${worker_port} \
+    --remote_download_toplevel \
+    //:symlink >& $TEST_log || fail "Failed to run //:symlink"
+
+  expect_log "Hello World"
+
+  rm bazel-bin/file.txt
+
+  bazel run \
+    --remote_executor=grpc://localhost:${worker_port} \
+    --remote_download_toplevel \
+    //:symlink >& $TEST_log || fail "Failed to run //:symlink"
+
+  expect_log "Hello World"
+}
+
+function test_download_toplevel_root_symlinks_runfiles() {
+    cat > rules.bzl <<EOF
+def _symlink_rule_impl(ctx):
+    file = ctx.actions.declare_file("file.txt")
+    executable = ctx.actions.declare_file("executable")
+
+    ctx.actions.run_shell(
+        outputs = [file],
+        command = "echo 'Hello World!' > " + file.path,
+    )
+    ctx.actions.write(executable, "[[ -L ../symlink.txt ]] && cat ../symlink.txt")
+    return [DefaultInfo(
+        runfiles = ctx.runfiles(
+            root_symlinks = {"symlink.txt": file},
+        ),
+        executable = executable,
+    )]
+
+symlink_rule = rule(
+    implementation = _symlink_rule_impl,
+    executable = True,
+    attrs = {},
+)
+EOF
+  cat > BUILD <<EOF
+load(":rules.bzl", "symlink_rule")
+symlink_rule(name = "symlink")
+EOF
+
+  bazel run \
+    --remote_executor=grpc://localhost:${worker_port} \
+    --remote_download_toplevel \
+    //:symlink >& $TEST_log || fail "Failed to run //:symlink"
+
+  expect_log "Hello World"
+
+  rm bazel-bin/file.txt
+
+  bazel run \
+    --remote_executor=grpc://localhost:${worker_port} \
+    --remote_download_toplevel \
+    //:symlink >& $TEST_log || fail "Failed to run //:symlink"
+
+  expect_log "Hello World"
 }
 
 run_suite "Build without the Bytes tests"

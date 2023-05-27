@@ -7,32 +7,18 @@ package(
     ],
 )
 
-filegroup(
-    name = "common_runner_java_files",
-    srcs = [
-        "BazelTestRunnerModule.java",
-        "JUnit4Bazel.java",
-        "ResultWriterFactory.java",
-        "StderrStreamFactory.java",
-        "StdoutStreamFactory.java",
-    ],
-)
-
 java_library(
     name = "test_runner",
     srcs = [
         "BazelTestRunner.java",
-        ":common_runner_java_files",
     ],
     deps = [
+        # Testrunner shouldn't be added to compile-time deps of java_library.
+        # Because of this removing Guava dependecy is a breaking change.
+        # TODO(b/113524892): Short time before Bazel LTS 7 is cut, remove Guava and release java_tools
+        "//third_party:guava",  # build_cleaner: keep
         "//src/java_tools/junitrunner/java/com/google/testing/junit/runner/internal",
         "//src/java_tools/junitrunner/java/com/google/testing/junit/runner/junit4",
-        "//src/java_tools/junitrunner/java/com/google/testing/junit/runner/model",
-        "//src/java_tools/junitrunner/java/com/google/testing/junit/runner/sharding",
-        "//src/java_tools/junitrunner/java/com/google/testing/junit/runner/util",
-        "//third_party:error_prone_annotations",
-        "//third_party:guava",
-        "//third_party:junit4",
     ],
 )
 

@@ -21,6 +21,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.io.Files;
+import com.google.devtools.build.lib.actions.ActionOwner;
 import com.google.devtools.build.lib.actions.ActionRegistry;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.Artifact.SpecialArtifact;
@@ -299,14 +300,12 @@ public final class CcCompilationHelper {
   private final ActionRegistry actionRegistry;
   private final ActionConstructionContext actionConstructionContext;
   private final Label label;
-  @Nullable private final Artifact grepIncludes;
 
   /** Creates a CcCompilationHelper that outputs artifacts in a given configuration. */
   public CcCompilationHelper(
       ActionRegistry actionRegistry,
       ActionConstructionContext actionConstructionContext,
       Label label,
-      @Nullable Artifact grepIncludes,
       CppSemantics semantics,
       FeatureConfiguration featureConfiguration,
       SourceCategory sourceCategory,
@@ -332,7 +331,6 @@ public final class CcCompilationHelper {
     this.ruleErrorConsumer = actionConstructionContext.getRuleErrorConsumer();
     this.actionRegistry = Preconditions.checkNotNull(actionRegistry);
     this.label = Preconditions.checkNotNull(label);
-    this.grepIncludes = grepIncludes;
     this.executionInfo = Preconditions.checkNotNull(executionInfo);
     this.shouldProcessHeaders = shouldProcessHeaders;
   }
@@ -342,7 +340,6 @@ public final class CcCompilationHelper {
       ActionRegistry actionRegistry,
       ActionConstructionContext actionConstructionContext,
       Label label,
-      @Nullable Artifact grepIncludes,
       CppSemantics semantics,
       FeatureConfiguration featureConfiguration,
       CcToolchainProvider ccToolchain,
@@ -353,7 +350,6 @@ public final class CcCompilationHelper {
         actionRegistry,
         actionConstructionContext,
         label,
-        grepIncludes,
         semantics,
         featureConfiguration,
         SourceCategory.CC,
@@ -910,7 +906,7 @@ public final class CcCompilationHelper {
                 originalHeader,
                 virtualHeader,
                 "Symlinking virtual headers for " + label,
-                /*useExecRootForSource=*/ true));
+                /* useExecRootForSource= */ true));
         moduleHeadersBuilder.add(virtualHeader);
         if (configuration.isCodeCoverageEnabled()) {
           virtualToOriginalHeaders.add(
@@ -1358,7 +1354,6 @@ public final class CcCompilationHelper {
       CppCompileActionBuilder builder = initializeCompileAction(sourceArtifact);
 
       builder
-          .setSemantics(semantics)
           .addMandatoryInputs(additionalCompilationInputs)
           .addAdditionalIncludeScanningRoots(additionalIncludeScanningRoots);
 
@@ -1439,15 +1434,13 @@ public final class CcCompilationHelper {
         // These are already handled above.
         continue;
       }
-      if (cppConfiguration.getParseHeadersSkippedIfCorrespondingSrcsFound()
-          && featureConfiguration.isEnabled(CppRuleClasses.VALIDATES_LAYERING_CHECK_IN_TEXTUAL_HDRS)
+      if (featureConfiguration.isEnabled(CppRuleClasses.VALIDATES_LAYERING_CHECK_IN_TEXTUAL_HDRS)
           && compiledBasenames.contains(
               Files.getNameWithoutExtension(artifact.getExecPathString()))) {
         continue;
       }
       CppCompileActionBuilder builder = initializeCompileAction(artifact);
       builder
-          .setSemantics(semantics)
           .addMandatoryInputs(additionalCompilationInputs)
           .addAdditionalIncludeScanningRoots(additionalIncludeScanningRoots);
 
@@ -1500,6 +1493,12 @@ public final class CcCompilationHelper {
           CppHelper.getDiagnosticsOutputTreeArtifact(
               actionConstructionContext, label, sourceArtifact, outputName, usePic);
     }
+
+    ActionOwner actionOwner = null;
+    if (actionConstructionContext instanceof RuleContext
+        && ((RuleContext) actionConstructionContext).useAutoExecGroups()) {
+      actionOwner = actionConstructionContext.getActionOwner(semantics.getCppToolchainType());
+    }
     CppCompileActionTemplate actionTemplate =
         new CppCompileActionTemplate(
             sourceArtifact,
@@ -1509,7 +1508,7 @@ public final class CcCompilationHelper {
             builder,
             ccToolchain,
             outputCategories,
-            actionConstructionContext.getActionOwner());
+            actionOwner == null ? actionConstructionContext.getActionOwner() : actionOwner);
     actionRegistry.registerAction(actionTemplate);
 
     return outputFiles;
@@ -1670,7 +1669,7 @@ public final class CcCompilationHelper {
    */
   private CppCompileActionBuilder initializeCompileAction(Artifact sourceArtifact) {
     return new CppCompileActionBuilder(
-            actionConstructionContext, grepIncludes, ccToolchain, configuration)
+            actionConstructionContext, ccToolchain, configuration, semantics)
         .setSourceFile(sourceArtifact)
         .setCcCompilationContext(ccCompilationContext)
         .setCoptsFilter(coptsFilter)
@@ -1687,7 +1686,6 @@ public final class CcCompilationHelper {
     boolean pic = module.getFilename().contains(".pic.");
 
     CppCompileActionBuilder builder = initializeCompileAction(module);
-    builder.setSemantics(semantics);
     builder.setPicMode(pic);
     builder.setOutputs(
         actionConstructionContext,
@@ -1736,7 +1734,7 @@ public final class CcCompilationHelper {
         configuration, featureConfiguration, builder, ruleErrorConsumer);
     CppCompileAction compileAction = builder.buildOrThrowRuleError(ruleErrorConsumer);
     actionRegistry.registerAction(compileAction);
-    Artifact objectFile = compileAction.getOutputFile();
+    Artifact objectFile = compileAction.getPrimaryOutput();
     if (pic) {
       result.addPicObjectFile(objectFile);
     } else {
@@ -1779,7 +1777,7 @@ public final class CcCompilationHelper {
         configuration, featureConfiguration, builder, ruleErrorConsumer);
     CppCompileAction compileAction = builder.buildOrThrowRuleError(ruleErrorConsumer);
     actionRegistry.registerAction(compileAction);
-    Artifact tokenFile = compileAction.getOutputFile();
+    Artifact tokenFile = compileAction.getPrimaryOutput();
     result.addHeaderTokenFile(tokenFile);
   }
 
@@ -1788,7 +1786,6 @@ public final class CcCompilationHelper {
     Artifact moduleMapArtifact = cppModuleMap.getArtifact();
     CppCompileActionBuilder builder = initializeCompileAction(moduleMapArtifact);
 
-    builder.setSemantics(semantics);
     Label label = Label.parseCanonicalUnchecked(cppModuleMap.getName());
 
     // A header module compile action is just like a normal compile action, but:
@@ -1873,13 +1870,13 @@ public final class CcCompilationHelper {
           configuration, featureConfiguration, picBuilder, ruleErrorConsumer);
       CppCompileAction picAction = picBuilder.buildOrThrowRuleError(ruleErrorConsumer);
       actionRegistry.registerAction(picAction);
-      directOutputs.add(picAction.getOutputFile());
+      directOutputs.add(picAction.getPrimaryOutput());
       if (addObject) {
-        result.addPicObjectFile(picAction.getOutputFile());
+        result.addPicObjectFile(picAction.getPrimaryOutput());
 
         if (bitcodeOutput) {
           result.addLtoBitcodeFile(
-              picAction.getOutputFile(), ltoIndexingFile, getCopts(sourceArtifact, sourceLabel));
+              picAction.getPrimaryOutput(), ltoIndexingFile, getCopts(sourceArtifact, sourceLabel));
         }
       }
       if (dwoFile != null) {
@@ -1944,7 +1941,7 @@ public final class CcCompilationHelper {
           configuration, featureConfiguration, builder, ruleErrorConsumer);
       CppCompileAction compileAction = builder.buildOrThrowRuleError(ruleErrorConsumer);
       actionRegistry.registerAction(compileAction);
-      Artifact objectFile = compileAction.getOutputFile();
+      Artifact objectFile = compileAction.getPrimaryOutput();
       directOutputs.add(objectFile);
       if (addObject) {
         result.addObjectFile(objectFile);
@@ -2123,7 +2120,7 @@ public final class CcCompilationHelper {
     CppCompileAction sdAction = sdBuilder.buildOrThrowRuleError(ruleErrorConsumer);
     actionRegistry.registerAction(sdAction);
 
-    return ImmutableList.of(dAction.getOutputFile(), sdAction.getOutputFile());
+    return ImmutableList.of(dAction.getPrimaryOutput(), sdAction.getPrimaryOutput());
   }
 
   /**

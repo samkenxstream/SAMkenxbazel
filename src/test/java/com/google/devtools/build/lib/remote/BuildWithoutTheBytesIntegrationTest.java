@@ -16,7 +16,10 @@ package com.google.devtools.build.lib.remote;
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.devtools.build.lib.remote.util.IntegrationTestUtils.startWorker;
+import static com.google.devtools.build.lib.vfs.FileSystemUtils.readContent;
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.Assert.assertThrows;
+import static org.junit.Assume.assumeFalse;
 
 import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.lib.actions.Artifact;
@@ -31,6 +34,8 @@ import com.google.devtools.build.lib.runtime.BuildSummaryStatsModule;
 import com.google.devtools.build.lib.standalone.StandaloneModule;
 import com.google.devtools.build.lib.util.OS;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
+import com.google.devtools.build.lib.vfs.Path;
+import com.google.devtools.build.lib.vfs.Symlinks;
 import java.io.IOException;
 import org.junit.After;
 import org.junit.Test;
@@ -55,6 +60,8 @@ public class BuildWithoutTheBytesIntegrationTest extends BuildWithoutTheBytesInt
         "--remote_download_minimal",
         "--dynamic_local_strategy=standalone",
         "--dynamic_remote_strategy=remote");
+    // (b/281655526) Skymeld is incompatible.
+    addOptions("--noexperimental_merged_skyframe_analysis_execution");
   }
 
   @Override
@@ -86,9 +93,8 @@ public class BuildWithoutTheBytesIntegrationTest extends BuildWithoutTheBytesInt
   }
 
   @Override
-  protected void assertOutputEquals(String realContent, String expectedContent, boolean isLocal)
-      throws Exception {
-    assertThat(realContent).isEqualTo(expectedContent);
+  protected void assertOutputEquals(Path path, String expectedContent) throws Exception {
+    assertThat(readContent(path, UTF_8)).isEqualTo(expectedContent);
   }
 
   @Override
@@ -433,6 +439,65 @@ public class BuildWithoutTheBytesIntegrationTest extends BuildWithoutTheBytesInt
   }
 
   @Test
+  public void outputSymlinkHandledGracefully() throws Exception {
+    // Symlinks may not be supported on Windows
+    assumeFalse(OS.getCurrent() == OS.WINDOWS);
+    write(
+        "a/defs.bzl",
+        "def _impl(ctx):",
+        "  out = ctx.actions.declare_symlink(ctx.label.name)",
+        "  ctx.actions.run_shell(",
+        "    inputs = [],",
+        "    outputs = [out],",
+        "    command = 'ln -s hello $1',",
+        "    arguments = [out.path],",
+        "  )",
+        "  return DefaultInfo(files = depset([out]))",
+        "",
+        "my_rule = rule(",
+        "  implementation = _impl,",
+        ")");
+
+    write("a/BUILD", "load(':defs.bzl', 'my_rule')", "", "my_rule(name = 'hello')");
+
+    buildTarget("//a:hello");
+
+    Path outputPath = getOutputPath("a/hello");
+    assertThat(outputPath.stat(Symlinks.NOFOLLOW).isSymbolicLink()).isTrue();
+  }
+
+  @Test
+  public void replaceOutputDirectoryWithFile() throws Exception {
+    write(
+        "a/defs.bzl",
+        "def _impl(ctx):",
+        "  dir = ctx.actions.declare_directory(ctx.label.name + '.dir')",
+        "  ctx.actions.run_shell(",
+        "    outputs = [dir],",
+        "    command = 'touch $1/hello',",
+        "    arguments = [dir.path],",
+        "  )",
+        "  return DefaultInfo(files = depset([dir]))",
+        "",
+        "my_rule = rule(",
+        "  implementation = _impl,",
+        ")");
+    write("a/BUILD", "load(':defs.bzl', 'my_rule')", "", "my_rule(name = 'hello')");
+
+    setDownloadToplevel();
+    buildTarget("//a:hello");
+
+    // Replace the existing output directory of the package with a file.
+    // A subsequent build should remove this file and replace it with a
+    // directory.
+    Path outputPath = getOutputPath("a");
+    outputPath.deleteTree();
+    FileSystemUtils.writeContent(outputPath, new byte[] {1, 2, 3, 4, 5});
+
+    buildTarget("//a:hello");
+  }
+
+  @Test
   public void remoteCacheEvictBlobs_whenPrefetchingInput_exitWithCode39() throws Exception {
     // Arrange: Prepare workspace and populate remote cache
     write(
@@ -455,7 +520,7 @@ public class BuildWithoutTheBytesIntegrationTest extends BuildWithoutTheBytesInt
 
     // Populate remote cache
     buildTarget("//a:bar");
-    var bytes = FileSystemUtils.readContent(getOutputPath("a/foo.out"));
+    var bytes = readContent(getOutputPath("a/foo.out"));
     var hashCode = getDigestHashFunction().getHashFunction().hashBytes(bytes);
     getOutputPath("a/foo.out").delete();
     getOutputPath("a/bar.out").delete();
@@ -474,9 +539,7 @@ public class BuildWithoutTheBytesIntegrationTest extends BuildWithoutTheBytesInt
     // Assert: Exit code is 39
     assertThat(error)
         .hasMessageThat()
-        .contains(
-            "Build without the Bytes does not work if your remote cache evicts blobs"
-                + " during builds");
+        .contains("Failed to fetch blobs because they do not exist remotely");
     assertThat(error).hasMessageThat().contains(String.format("%s/%s", hashCode, bytes.length));
     assertThat(error.getDetailedExitCode().getExitCode().getNumericExitCode()).isEqualTo(39);
   }
@@ -505,7 +568,7 @@ public class BuildWithoutTheBytesIntegrationTest extends BuildWithoutTheBytesInt
     setDownloadAll();
     buildTarget("//a:bar");
     waitDownloads();
-    var bytes = FileSystemUtils.readContent(getOutputPath("a/foo.out"));
+    var bytes = readContent(getOutputPath("a/foo.out"));
     var hashCode = getDigestHashFunction().getHashFunction().hashBytes(bytes);
     getOutputPath("a/foo.out").delete();
     getOutputPath("a/bar.out").delete();
@@ -621,7 +684,118 @@ public class BuildWithoutTheBytesIntegrationTest extends BuildWithoutTheBytesInt
     waitDownloads();
 
     // Assert: target was successfully built
-    assertValidOutputFile(
-        "a/bar.out", "file-inside\nupdated bar" + lineSeparator(), /* isLocal= */ true);
+    assertValidOutputFile("a/bar.out", "file-inside\nupdated bar" + lineSeparator());
+  }
+
+  @Test
+  public void downloadToplevel_symlinkFile() throws Exception {
+    // TODO(chiwang): Make metadata for downloaded symlink non-remote.
+    assumeFalse(OS.getCurrent() == OS.WINDOWS);
+
+    setDownloadToplevel();
+    writeSymlinkRule();
+    write(
+        "BUILD",
+        "load(':symlink.bzl', 'symlink')",
+        "genrule(",
+        "  name = 'foo',",
+        "  srcs = [],",
+        "  outs = ['out/foo.txt'],",
+        "  cmd = 'echo foo > $@',",
+        ")",
+        "symlink(",
+        "  name = 'foo-link',",
+        "  target = ':foo'",
+        ")");
+
+    buildTarget("//:foo-link");
+
+    assertValidOutputFile("foo-link", "foo\n");
+
+    // Delete link, re-plant symlink
+    getOutputPath("foo-link").delete();
+
+    buildTarget("//:foo-link");
+
+    assertValidOutputFile("foo-link", "foo\n");
+
+    // Delete target, re-download it
+    getOutputPath("foo").delete();
+
+    assertValidOutputFile("foo-link", "foo\n");
+  }
+
+  @Test
+  public void downloadToplevel_symlinkSourceFile() throws Exception {
+    // TODO(chiwang): Make metadata for downloaded symlink non-remote.
+    assumeFalse(OS.getCurrent() == OS.WINDOWS);
+
+    setDownloadToplevel();
+    writeSymlinkRule();
+    write(
+        "BUILD",
+        "load(':symlink.bzl', 'symlink')",
+        "symlink(",
+        "  name = 'foo-link',",
+        "  target = ':foo.txt'",
+        ")");
+    write("foo.txt", "foo");
+
+    buildTarget("//:foo-link");
+
+    assertOnlyOutputContent("//:foo-link", "foo-link", "foo" + lineSeparator());
+
+    // Delete link, re-plant symlink
+    getOutputPath("foo-link").delete();
+
+    buildTarget("//:foo-link");
+
+    assertOnlyOutputContent("//:foo-link", "foo-link", "foo" + lineSeparator());
+  }
+
+  @Test
+  public void downloadToplevel_symlinkTree() throws Exception {
+    // TODO(chiwang): Make metadata for downloaded symlink non-remote.
+    assumeFalse(OS.getCurrent() == OS.WINDOWS);
+
+    setDownloadToplevel();
+    writeSymlinkRule();
+    writeOutputDirRule();
+    write(
+        "BUILD",
+        "load(':output_dir.bzl', 'output_dir')",
+        "load(':symlink.bzl', 'symlink')",
+        "output_dir(",
+        "  name = 'foo',",
+        "  content_map = {'file-1': '1', 'file-2': '2', 'file-3': '3'},",
+        ")",
+        "symlink(",
+        "  name = 'foo-link',",
+        "  target = ':foo'",
+        ")");
+
+    buildTarget("//:foo-link");
+
+    assertValidOutputFile("foo-link/file-1", "1");
+    assertValidOutputFile("foo-link/file-2", "2");
+    assertValidOutputFile("foo-link/file-3", "3");
+
+    getOutputPath("foo-link").deleteTree();
+
+    // Delete link, re-plant symlink
+    buildTarget("//:foo-link");
+
+    assertValidOutputFile("foo-link/file-1", "1");
+    assertValidOutputFile("foo-link/file-2", "2");
+    assertValidOutputFile("foo-link/file-3", "3");
+
+    // Delete target, re-download them
+    getOutputPath("foo").deleteTree();
+
+    buildTarget("//:foo-link");
+
+    assertValidOutputFile("foo-link/file-1", "1");
+    assertValidOutputFile("foo-link/file-2", "2");
+    assertValidOutputFile("foo-link/file-3", "3");
   }
 }

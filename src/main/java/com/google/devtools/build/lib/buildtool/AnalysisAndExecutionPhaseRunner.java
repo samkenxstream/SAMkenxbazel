@@ -15,7 +15,6 @@ package com.google.devtools.build.lib.buildtool;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Sets;
 import com.google.common.eventbus.Subscribe;
 import com.google.common.flogger.GoogleLogger;
 import com.google.devtools.build.lib.actions.BuildFailedException;
@@ -58,7 +57,7 @@ import com.google.devtools.build.lib.util.RegexFilter;
 import com.google.devtools.common.options.OptionsParsingException;
 import java.util.Collection;
 import java.util.List;
-import java.util.Set;
+import javax.annotation.Nullable;
 
 /**
  * Intended drop-in replacement for AnalysisPhaseRunner after we're done with merging Skyframe's
@@ -73,6 +72,7 @@ public final class AnalysisAndExecutionPhaseRunner {
 
   private AnalysisAndExecutionPhaseRunner() {}
 
+  @Nullable
   static AnalysisAndExecutionResult execute(
       CommandEnvironment env,
       BuildRequest request,
@@ -151,6 +151,8 @@ public final class AnalysisAndExecutionPhaseRunner {
         AnalysisPhaseRunner.reportTargets(env, buildResultListener.getAnalyzedTargets());
       }
 
+      AnalysisPhaseRunner.postAbortedEventsForSkippedTargets(
+          env, buildResultListener.getSkippedTargets());
     } else {
       env.getReporter().handle(Event.progress("Loading complete."));
       env.getReporter().post(new NoAnalyzeEvent());
@@ -241,6 +243,7 @@ public final class AnalysisAndExecutionPhaseRunner {
             request.getAspectsParameters(),
             request.getViewOptions(),
             request.getKeepGoing(),
+            request.getViewOptions().skipIncompatibleExplicitTargets,
             request.getCheckForActionConflicts(),
             env.getQuiescingExecutors(),
             request.getTopLevelArtifactContext(),
@@ -249,6 +252,7 @@ public final class AnalysisAndExecutionPhaseRunner {
             env.getEventBus(),
             env.getRuntime().getBugReporter(),
             /* includeExecutionPhase= */ true,
+            request.getBuildOptions().skymeldAnalysisOverlapPercentage,
             env.getLocalResourceManager(),
             env.getBuildResultListener(),
             executionSetupCallback,
@@ -320,8 +324,6 @@ public final class AnalysisAndExecutionPhaseRunner {
     private final CommandEnvironment env;
     private final BuildRequest buildRequest;
     private final BuildOptions buildOptions;
-    private final Set<TopLevelTargetAnalyzedEvent> processedEvents;
-
     private TopLevelTargetAnalysisWatcher(
         Iterable<BlazeModule> blazeModules,
         CommandEnvironment env,
@@ -331,7 +333,6 @@ public final class AnalysisAndExecutionPhaseRunner {
       this.env = env;
       this.buildRequest = buildRequest;
       this.buildOptions = buildOptions;
-      this.processedEvents = Sets.newConcurrentHashSet();
     }
 
     /** Creates an AnalysisOperationWatcher and registers it with the provided eventBus. */
@@ -349,13 +350,6 @@ public final class AnalysisAndExecutionPhaseRunner {
     @Subscribe
     public void handleTopLevelEntityAnalysisConcluded(TopLevelTargetAnalyzedEvent e)
         throws ViewCreationFailedException, InterruptedException {
-      // TopLevelTargetAnalyzedEvent originates from within Skyframe, which means there'll likely
-      // be multiple events fired for the same underlying ConfiguredTarget due to SkyFunction
-      // restarts. We only process them once.
-      if (!processedEvents.add(e)) {
-        return;
-      }
-
       for (BlazeModule blazeModule : blazeModules) {
         blazeModule.afterTopLevelTargetAnalysis(
             env, buildRequest, buildOptions, e.configuredTarget());

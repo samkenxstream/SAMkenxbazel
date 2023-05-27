@@ -56,7 +56,6 @@ import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.packages.RuleClass.ConfiguredTargetFactory.RuleErrorException;
 import com.google.devtools.build.lib.packages.TargetUtils;
-import com.google.devtools.build.lib.rules.apple.AppleCommandLineOptions.AppleBitcodeMode;
 import com.google.devtools.build.lib.rules.apple.AppleConfiguration;
 import com.google.devtools.build.lib.rules.apple.XcodeConfigInfo;
 import com.google.devtools.build.lib.rules.cpp.CcCommon;
@@ -571,6 +570,10 @@ public class CompilationSupport implements StarlarkValue {
         Iterables.isEmpty(prunedJ2ObjcArchives)
             ? asNeededLibrarySet
             : substituteJ2ObjcPrunedLibraries(asNeededLibrarySet, secondaryObjcProvider);
+    alwaysLinkLibrarySet =
+        Iterables.isEmpty(prunedJ2ObjcArchives)
+            ? alwaysLinkLibrarySet
+            : substituteJ2ObjcPrunedLibraries(alwaysLinkLibrarySet, secondaryObjcProvider);
 
     ImmutableList<Artifact> asNeededLibraryList = asNeededLibrarySet.asList();
     ImmutableList<Artifact> alwaysLinkLibraryList = alwaysLinkLibrarySet.asList();
@@ -650,7 +653,6 @@ public class CompilationSupport implements StarlarkValue {
                 ruleContext.getSymbolGenerator(),
                 TargetUtils.getExecutionInfo(
                     ruleContext.getRule(), ruleContext.isAllowTagsPropagation()))
-            .setGrepIncludes(CppHelper.getGrepIncludes(ruleContext))
             .setIsStampingEnabled(isStampingEnabled)
             .setTestOrTestOnlyTarget(ruleContext.isTestOnlyTarget() || ruleContext.isTestTarget())
             .addNonCodeLinkerInputs(asNeededLibraryList)
@@ -692,14 +694,6 @@ public class CompilationSupport implements StarlarkValue {
       Artifact linkmap = intermediateArtifacts.linkmap();
       extensionBuilder.setLinkmap(linkmap).addVariableCategory(VariableCategory.LINKMAP_VARIABLES);
       linkerOutputs.add(linkmap);
-    }
-
-    if (cppConfiguration.getAppleBitcodeMode() == AppleBitcodeMode.EMBEDDED) {
-      Artifact bitcodeSymbolMap = intermediateArtifacts.bitcodeSymbolMap();
-      extensionBuilder
-          .setBitcodeSymbolMap(bitcodeSymbolMap)
-          .addVariableCategory(VariableCategory.BITCODE_VARIABLES);
-      linkerOutputs.add(bitcodeSymbolMap);
     }
 
     executableLinkingHelper.addVariableExtension(extensionBuilder.build());

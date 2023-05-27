@@ -48,11 +48,13 @@ import com.google.devtools.build.lib.analysis.config.transitions.ConfigurationTr
 import com.google.devtools.build.lib.analysis.config.transitions.NoTransition;
 import com.google.devtools.build.lib.analysis.configuredtargets.InputFileConfiguredTarget;
 import com.google.devtools.build.lib.analysis.starlark.StarlarkTransition;
+import com.google.devtools.build.lib.bazel.bzlmod.BazelLockFileFunction;
 import com.google.devtools.build.lib.bazel.bzlmod.BazelModuleResolutionFunction;
 import com.google.devtools.build.lib.bazel.bzlmod.FakeRegistry;
 import com.google.devtools.build.lib.bazel.bzlmod.ModuleFileFunction;
 import com.google.devtools.build.lib.bazel.repository.RepositoryOptions.BazelCompatibilityMode;
 import com.google.devtools.build.lib.bazel.repository.RepositoryOptions.CheckDirectDepsMode;
+import com.google.devtools.build.lib.bazel.repository.RepositoryOptions.LockfileMode;
 import com.google.devtools.build.lib.buildtool.BuildRequestOptions;
 import com.google.devtools.build.lib.clock.BlazeClock;
 import com.google.devtools.build.lib.cmdline.Label;
@@ -79,6 +81,7 @@ import com.google.devtools.build.lib.skyframe.ConfiguredTargetAndData;
 import com.google.devtools.build.lib.skyframe.ConfiguredTargetKey;
 import com.google.devtools.build.lib.skyframe.PrecomputedValue;
 import com.google.devtools.build.lib.skyframe.SkyframeExecutor;
+import com.google.devtools.build.lib.skyframe.SkyframeExecutorRepositoryHelpersHolder;
 import com.google.devtools.build.lib.skyframe.TargetPatternPhaseValue;
 import com.google.devtools.build.lib.skyframe.util.SkyframeExecutorTestUtils;
 import com.google.devtools.build.lib.testutil.FoundationTestCase;
@@ -96,12 +99,15 @@ import com.google.devtools.build.lib.vfs.SyscallCache;
 import com.google.devtools.common.options.Options;
 import com.google.devtools.common.options.OptionsParser;
 import com.google.errorprone.annotations.CanIgnoreReturnValue;
+import com.google.errorprone.annotations.ForOverride;
 import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import javax.annotation.Nullable;
+import org.junit.After;
 import org.junit.Before;
 
 /**
@@ -209,7 +215,12 @@ public abstract class AnalysisTestCase extends FoundationTestCase {
     useRuleClassProvider(analysisMock.createRuleClassProvider());
   }
 
-  protected SkyframeExecutor createSkyframeExecutor(PackageFactory pkgFactory) {
+  @After
+  public final void cleanupInterningPools() {
+    skyframeExecutor.getEvaluator().cleanupInterningPools();
+  }
+
+  private SkyframeExecutor createSkyframeExecutor(PackageFactory pkgFactory) {
     return BazelSkyframeExecutorConstants.newBazelSkyframeExecutorBuilder()
         .setPkgFactory(pkgFactory)
         .setFileSystem(fileSystem)
@@ -218,7 +229,14 @@ public abstract class AnalysisTestCase extends FoundationTestCase {
         .setWorkspaceStatusActionFactory(workspaceStatusActionFactory)
         .setExtraSkyFunctions(analysisMock.getSkyFunctions(directories))
         .setSyscallCache(delegatingSyscallCache)
+        .setRepositoryHelpersHolder(getRepositoryHelpersHolder())
         .build();
+  }
+
+  @ForOverride
+  @Nullable
+  protected SkyframeExecutorRepositoryHelpersHolder getRepositoryHelpersHolder() {
+    return null;
   }
 
   /** Changes the rule class provider to be used for the loading and the analysis phase. */
@@ -242,7 +260,9 @@ public abstract class AnalysisTestCase extends FoundationTestCase {
                         BazelModuleResolutionFunction.ALLOWED_YANKED_VERSIONS, ImmutableList.of()),
                     PrecomputedValue.injected(
                         BazelModuleResolutionFunction.BAZEL_COMPATIBILITY_MODE,
-                        BazelCompatibilityMode.ERROR)))
+                        BazelCompatibilityMode.ERROR),
+                    PrecomputedValue.injected(
+                        BazelLockFileFunction.LOCKFILE_MODE, LockfileMode.OFF)))
             .build(ruleClassProvider, fileSystem);
     useConfiguration();
     skyframeExecutor = createSkyframeExecutor(pkgFactory);
@@ -291,7 +311,8 @@ public abstract class AnalysisTestCase extends FoundationTestCase {
                 BazelModuleResolutionFunction.ALLOWED_YANKED_VERSIONS, ImmutableList.of()),
             PrecomputedValue.injected(
                 BazelModuleResolutionFunction.BAZEL_COMPATIBILITY_MODE,
-                BazelCompatibilityMode.WARNING)));
+                BazelCompatibilityMode.WARNING),
+            PrecomputedValue.injected(BazelLockFileFunction.LOCKFILE_MODE, LockfileMode.OFF)));
   }
 
   /** Resets the SkyframeExecutor, as if a clean had been executed. */
@@ -626,7 +647,8 @@ public abstract class AnalysisTestCase extends FoundationTestCase {
         ConfiguredTargetKey.builder()
             .setLabel(label)
             .setConfigurationKey(owner.getConfigurationKey())
-            .build();
+            .build()
+            .toKey();
     ActionLookupValue actionLookupValue;
     try {
       actionLookupValue =

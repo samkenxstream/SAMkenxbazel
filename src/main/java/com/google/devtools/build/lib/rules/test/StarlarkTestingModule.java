@@ -80,7 +80,6 @@ public class StarlarkTestingModule implements TestingModuleApi {
             /* executable= */ false,
             /* outputToGenfiles= */ false,
             /* fragments= */ fragments,
-            /* hostFragments= */ StarlarkList.empty(),
             /* starlarkTestable= */ false,
             /* toolchains= */ toolchains,
             /* doc= */ Starlark.NONE,
@@ -90,7 +89,6 @@ public class StarlarkTestingModule implements TestingModuleApi {
             /* buildSetting= */ Starlark.NONE,
             /* cfg= */ Starlark.NONE,
             /* execGroups= */ Starlark.NONE,
-            /* compileOneFiletype= */ Starlark.NONE,
             /* name= */ Starlark.NONE,
             thread);
 

@@ -181,18 +181,23 @@ class XmlOutputFormatter extends AbstractUnorderedFormatter {
         inputElem.setAttribute("name", label.toString());
         elem.appendChild(inputElem);
       }
-      for (Label label :
-          aspectResolver.computeAspectDependencies(target, dependencyFilter).values()) {
-        Element inputElem = doc.createElement("rule-input");
-        inputElem.setAttribute("name", label.toString());
-        elem.appendChild(inputElem);
-      }
+
+      aspectResolver.computeAspectDependencies(target, dependencyFilter).values().stream()
+          .flatMap(m -> m.values().stream())
+          .distinct()
+          .forEach(
+              label -> {
+                Element inputElem = doc.createElement("rule-input");
+                inputElem.setAttribute("name", label.toString());
+                elem.appendChild(inputElem);
+              });
+
       for (OutputFile outputFile : rule.getOutputFiles()) {
         Element outputElem = doc.createElement("rule-output");
         outputElem.setAttribute("name", outputFile.getLabel().toString());
         elem.appendChild(outputElem);
       }
-      for (String feature : rule.getPackage().getFeatures()) {
+      for (String feature : rule.getPackage().getFeatures().toStringList()) {
         Element outputElem = doc.createElement("rule-default-setting");
         outputElem.setAttribute("name", feature);
         elem.appendChild(outputElem);
@@ -263,13 +268,13 @@ class XmlOutputFormatter extends AbstractUnorderedFormatter {
   }
 
   private static void addPackageGroupsToElement(Document doc, Element parent, Target target) {
-    for (Label visibilityDependency : target.getVisibility().getDependencyLabels()) {
+    for (Label visibilityDependency : target.getVisibilityDependencyLabels()) {
       Element elem = doc.createElement("package-group");
       elem.setAttribute("name", visibilityDependency.toString());
       parent.appendChild(elem);
     }
 
-    for (Label visibilityDeclaration : target.getVisibility().getDeclaredLabels()) {
+    for (Label visibilityDeclaration : target.getVisibilityDeclaredLabels()) {
       Element elem = doc.createElement("visibility-label");
       elem.setAttribute("name", visibilityDeclaration.toString());
       parent.appendChild(elem);
@@ -277,7 +282,7 @@ class XmlOutputFormatter extends AbstractUnorderedFormatter {
   }
 
   private static void addFeaturesToElement(Document doc, Element parent, InputFile inputFile) {
-    for (String feature : inputFile.getPackage().getFeatures()) {
+    for (String feature : inputFile.getPackage().getFeatures().toStringList()) {
       Element elem = doc.createElement("feature");
       elem.setAttribute("name", feature);
       parent.appendChild(elem);

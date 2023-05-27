@@ -102,7 +102,6 @@ public final class ObjcCommon implements StarlarkValue {
     private Optional<CompilationAttributes> compilationAttributes = Optional.absent();
     private Optional<CompilationArtifacts> compilationArtifacts = Optional.absent();
     private Iterable<ObjcProvider> objcProviders = ImmutableList.of();
-    private Iterable<ObjcProvider> runtimeObjcProviders = ImmutableList.of();
     private Iterable<PathFragment> includes = ImmutableList.of();
     private IntermediateArtifacts intermediateArtifacts;
     private boolean alwayslink;
@@ -112,6 +111,8 @@ public final class ObjcCommon implements StarlarkValue {
     private final List<CcCompilationContext> ccCompilationContexts = new ArrayList<>();
     private final List<CcLinkingContext> ccLinkingContexts = new ArrayList<>();
     private final List<CcCompilationContext> directCCompilationContexts = new ArrayList<>();
+    private final List<CcCompilationContext> implementationCcCompilationContexts =
+        new ArrayList<>();
     // List of CcLinkingContext to be merged into ObjcProvider, to be done for deps that don't have
     // ObjcProviders.
     // TODO(b/171413861): remove after objc link info migration.
@@ -177,6 +178,13 @@ public final class ObjcCommon implements StarlarkValue {
     @CanIgnoreReturnValue
     Builder addCcLinkingContexts(Iterable<CcInfo> ccInfos) {
       ccInfos.forEach(ccInfo -> ccLinkingContexts.add(ccInfo.getCcLinkingContext()));
+      return this;
+    }
+
+    @CanIgnoreReturnValue
+    Builder addImplementationCcCompilationContexts(Iterable<CcInfo> ccInfos) {
+      ccInfos.forEach(
+          ccInfo -> implementationCcCompilationContexts.add(ccInfo.getCcCompilationContext()));
       return this;
     }
 
@@ -292,6 +300,8 @@ public final class ObjcCommon implements StarlarkValue {
           ImmutableList.copyOf(this.ccLinkingContexts);
       ImmutableList<CcCompilationContext> directCCompilationContexts =
           ImmutableList.copyOf(this.directCCompilationContexts);
+      ImmutableList<CcCompilationContext> implementationCcCompilationContexts =
+          ImmutableList.copyOf(this.implementationCcCompilationContexts);
       ImmutableList<CcLinkingContext> ccLinkingContextsForMerging =
           ImmutableList.copyOf(this.ccLinkingContextsForMerging);
 
@@ -307,11 +317,11 @@ public final class ObjcCommon implements StarlarkValue {
       objcCompilationContextBuilder
           .addIncludes(includes)
           .addObjcProviders(objcProviders)
-          .addObjcProviders(runtimeObjcProviders)
           .addDirectCcCompilationContexts(directCCompilationContexts)
           // TODO(bazel-team): This pulls in stl via
           // CcCompilationHelper.getStlCcCompilationContext(), but probably shouldn't.
-          .addCcCompilationContexts(ccCompilationContexts);
+          .addCcCompilationContexts(ccCompilationContexts)
+          .addImplementationCcCompilationContexts(implementationCcCompilationContexts);
 
       for (CcLinkingContext ccLinkingContext : ccLinkingContextsForMerging) {
         ImmutableList<String> linkOpts = ccLinkingContext.getFlattenedUserLinkFlags();

@@ -132,11 +132,14 @@ public final class SandboxHelpers {
       Set<PathFragment> inputsToCreate,
       Set<PathFragment> dirsToCreate,
       Path workDir)
-      throws IOException {
+      throws IOException, InterruptedException {
     // To avoid excessive scanning of dirsToCreate for prefix dirs, we prepopulate this set of
     // prefixes.
     Set<PathFragment> prefixDirs = new HashSet<>();
     for (PathFragment dir : dirsToCreate) {
+      if (Thread.interrupted()) {
+        throw new InterruptedException();
+      }
       PathFragment parent = dir.getParentDirectory();
       while (parent != null && !prefixDirs.contains(parent)) {
         prefixDirs.add(parent);
@@ -157,9 +160,12 @@ public final class SandboxHelpers {
       Set<PathFragment> dirsToCreate,
       Path workDir,
       Set<PathFragment> prefixDirs)
-      throws IOException {
+      throws IOException, InterruptedException {
     Path execroot = workDir.getParentDirectory();
     for (Dirent dirent : root.readdir(Symlinks.NOFOLLOW)) {
+      if (Thread.interrupted()) {
+        throw new InterruptedException();
+      }
       Path absPath = root.getChild(dirent.getName());
       PathFragment pathRelativeToWorkDir;
       if (absPath.startsWith(workDir)) {
@@ -280,7 +286,8 @@ public final class SandboxHelpers {
    *     are disallowed, for stricter sandboxing.
    */
   public static void createDirectories(
-      Iterable<PathFragment> dirsToCreate, Path dir, boolean strict) throws IOException {
+      Iterable<PathFragment> dirsToCreate, Path dir, boolean strict)
+      throws IOException, InterruptedException {
     Set<Path> knownDirectories = new HashSet<>();
     // Add sandboxExecRoot and it's parent -- all paths must fall under the parent of
     // sandboxExecRoot and we know that sandboxExecRoot exists. This stops the recursion in
@@ -289,6 +296,9 @@ public final class SandboxHelpers {
     knownDirectories.add(dir.getParentDirectory());
 
     for (PathFragment path : dirsToCreate) {
+      if (Thread.interrupted()) {
+        throw new InterruptedException();
+      }
       if (strict) {
         Preconditions.checkArgument(!path.isAbsolute(), path);
         if (path.containsUplevelReferences() && path.isMultiSegment()) {
@@ -452,7 +462,7 @@ public final class SandboxHelpers {
       Path withinSandboxExecRootPath,
       ImmutableList<Root> packageRoots,
       Path sandboxSourceRoots)
-      throws IOException {
+      throws IOException, InterruptedException {
     Root withinSandboxExecRoot = Root.fromPath(withinSandboxExecRootPath);
     Root execRoot =
         withinSandboxExecRootPath.equals(execRootPath)
@@ -465,9 +475,13 @@ public final class SandboxHelpers {
     Map<Root, Root> sourceRootToSandboxSourceRoot = new TreeMap<>();
 
     for (Map.Entry<PathFragment, ActionInput> e : inputMap.entrySet()) {
+      if (Thread.interrupted()) {
+        throw new InterruptedException();
+      }
       PathFragment pathFragment = e.getKey();
       ActionInput actionInput = e.getValue();
       if (actionInput instanceof VirtualActionInput) {
+        // TODO(larsrc): Figure out which VAIs actually require atomicity, maybe avoid it.
         VirtualActionInput input = (VirtualActionInput) actionInput;
         byte[] digest =
             input.atomicallyWriteRelativeTo(
@@ -475,7 +489,9 @@ public final class SandboxHelpers {
                 // When 2 actions try to atomically create the same virtual input, they need to have
                 // a different suffix for the temporary file in order to avoid racy write to the
                 // same one.
-                ".sandbox" + tempFileUniquifierForVirtualInputWrites.incrementAndGet());
+                "_sandbox"
+                    + tempFileUniquifierForVirtualInputWrites.incrementAndGet()
+                    + ".virtualinputlock");
         virtualInputs.put(input, digest);
       }
 
@@ -523,9 +539,7 @@ public final class SandboxHelpers {
     }
 
     Map<Root, Path> sandboxRootToSourceRoot = new TreeMap<>();
-    for (Map.Entry<Root, Root> entry : sourceRootToSandboxSourceRoot.entrySet()) {
-      sandboxRootToSourceRoot.put(entry.getValue(), entry.getKey().asPath());
-    }
+    sourceRootToSandboxSourceRoot.forEach((k, v) -> sandboxRootToSourceRoot.put(v, k.asPath()));
 
     return new SandboxInputs(inputFiles, virtualInputs, inputSymlinks, sandboxRootToSourceRoot);
   }

@@ -11,7 +11,7 @@ graph.
 
 It achieves this by running over the results of Bazel's [analysis
 phase](/extending/concepts#evaluation-model),
-which integrates these effects. `query`, by constrast, runs over the results of
+which integrates these effects. `query`, by contrast, runs over the results of
 Bazel's loading phase, before options are evaluated.
 
 For example:
@@ -65,8 +65,8 @@ the [configuration](/reference/glossary#configuration) the
 target is built with.
 
 Since `cquery` runs over the configured target graph. it doesn't have insight
-into artifacts like build actions nor access to `[test_suite](/reference/be/general#test_suite)`
-rules as they are not configured targets. For the former, see `[aquery](/query/aquery)`.
+into artifacts like build actions nor access to [`test_suite`](/reference/be/general#test_suite)
+rules as they are not configured targets. For the former, see [`aquery`](/query/aquery).
 
 ## Basic syntax {:#basic-syntax}
 
@@ -209,8 +209,9 @@ genrule(
      cmd = "$(locations :tool) $&lt; >$@",
      tools = [":tool"],
 )
-cc_library(
+cc_binary(
     name = "tool",
+    srcs = ["tool.cpp"],
 )
 </pre>
 
@@ -275,24 +276,17 @@ of resolved toolchains.
 
 #### `--include_aspects` (boolean, default=True) {:#include-aspects}
 
-[Aspects](/extending/aspects) can add
-additional dependencies to a build. By default, `cquery` doesn't follow aspects because
-they make the queryable graph bigger, which uses more memory. But following them produces more
-accurate results.
+Include dependencies added by [aspects](/extending/aspects).
 
-If you're not worried about the memory impact of large queries, enable this flag by default in
-your bazelrc.
-
-If you query with aspects disabled, you can experience a problem where target X fails while
-building target Y but `cquery somepath(Y, X)` and `cquery deps(Y) | grep 'X'
-` return no results because the dependency occurs through an aspect.
+If this flag is disabled, `cquery somepath(X, Y)` and
+`cquery deps(X) | grep 'Y'` omit Y if X only depends on it through an aspect.
 
 ## Output formats {:#output-formats}
 
 By default, cquery outputs results in a dependency-ordered list of label and configuration pairs.
 There are other options for exposing the results as well.
 
-###  Transitions {:#transitions}
+### Transitions {:#transitions}
 
 <pre>
 --transitions=lite
@@ -324,7 +318,7 @@ outputs the same information without the options diff.
 
 This option causes the resulting targets to be printed in a binary protocol
 buffer form. The definition of the protocol buffer can be found at
-[src/main/protobuf/analysis.proto](https://github.com/bazelbuild/bazel/blob/master/src/main/protobuf/analysis_v2.proto){: .external}.
+[src/main/protobuf/analysis_v2.proto](https://github.com/bazelbuild/bazel/blob/master/src/main/protobuf/analysis_v2.proto){: .external}.
 
 `CqueryResult` is the top level message containing the results of the cquery. It
 has a list of `ConfiguredTarget` messages and a list of `Configuration`
@@ -368,6 +362,12 @@ output groups as determined by the
 [`--output_groups`](/reference/command-line-reference#flag--output_groups) flag.
 It does include source files.
 
+All paths emitted by this output format are relative to the
+[execroot](https://bazel.build/remote/output-directories), which can be obtained
+via `bazel info execution_root`. If the `bazel-out` convenience symlink exists,
+paths to files in the main repository also resolve relative to the workspace
+directory.
+
 Note: The output of `bazel cquery --output=files //pkg:foo` contains the output
 files of `//pkg:foo` in *all* configurations that occur in the build (also see
 the [section on target pattern evaluation](#target-pattern-evaluation)). If that
@@ -383,7 +383,7 @@ This output format calls a [Starlark](/rules/language)
 function for each configured target in the query result, and prints the value
 returned by the call. The `--starlark:file` flag specifies the location of a
 Starlark file that defines a function named `format` with a single parameter,
-`target`. This function is called for each [Target](/rules/lib/Target)
+`target`. This function is called for each [Target](/rules/lib/builtins/Target)
 in the query result. Alternatively, for convenience, you may specify just the
 body of a function declared as `def format(target): return expr` by using the
 `--starlark:expr` flag.
@@ -526,12 +526,12 @@ different niches. Consider the following to decide which is right for you:
     `query` does. Specifically, `cquery`
     evaluates _configured targets_ while `query` only
     evaluates _targets_. This takes more time and uses more memory.
-*   `cquery`'s intepretation of
+*   `cquery`'s interpretation of
     the [query language](/query/language) introduces ambiguity
     that `query` avoids. For example,
     if `"//foo"` exists in two configurations, which one
     should `cquery "deps(//foo)"` use?
-    The `[config](#config)`</code> function can help with this.
+    The [`config`](#config) function can help with this.
 *   As a newer tool, `cquery` lacks support for certain use
     cases. See [Known issues](#known-issues) for details.
 

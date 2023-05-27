@@ -31,7 +31,7 @@ import com.google.common.flogger.GoogleLogger;
 import com.google.devtools.build.lib.actions.ActionAnalysisMetadata;
 import com.google.devtools.build.lib.actions.ActionGraph;
 import com.google.devtools.build.lib.actions.ActionLookupData;
-import com.google.devtools.build.lib.actions.ActionLookupKey;
+import com.google.devtools.build.lib.actions.ActionLookupKeyOrProxy;
 import com.google.devtools.build.lib.actions.ActionLookupValue;
 import com.google.devtools.build.lib.actions.Actions;
 import com.google.devtools.build.lib.actions.Artifact;
@@ -150,6 +150,8 @@ import javax.annotation.Nullable;
  * </ul>
  *
  * <p>See also {@link ConfiguredTarget} which documents some important invariants.
+ *
+ * <p>Lifespan: 1 invocation.
  */
 public class BuildView {
   private static final GoogleLogger logger = GoogleLogger.forEnclosingClass();
@@ -160,6 +162,8 @@ public class BuildView {
   private final SkyframeBuildView skyframeBuildView;
 
   private final ConfiguredRuleClassProvider ruleClassProvider;
+
+  @Nullable private ImmutableSet<Artifact> memoizedCoverageArtifacts;
 
   /** A factory class to create the coverage report action. May be null. */
   @Nullable private final CoverageReportActionFactory coverageReportActionFactory;
@@ -211,6 +215,7 @@ public class BuildView {
       ImmutableMap<String, String> aspectsParameters,
       AnalysisOptions viewOptions,
       boolean keepGoing,
+      boolean skipIncompatibleExplicitTargets,
       boolean checkForActionConflicts,
       QuiescingExecutors executors,
       TopLevelArtifactContext topLevelOptions,
@@ -219,6 +224,7 @@ public class BuildView {
       EventBus eventBus,
       BugReporter bugReporter,
       boolean includeExecutionPhase,
+      int skymeldAnalysisOverlapPercentage,
       @Nullable ResourceManager resourceManager,
       @Nullable BuildResultListener buildResultListener,
       @Nullable ExecutionSetup executionSetupCallback,
@@ -422,15 +428,18 @@ public class BuildView {
                 Preconditions.checkNotNull(resourceManager), // non-null for skymeld.
                 Preconditions.checkNotNull(buildResultListener), // non-null for skymeld.
                 (configuredTargets, allTargetsToTest) ->
-                    getCoverageArtifactsHelper(
+                    memoizedGetCoverageArtifactsHelper(
                         configuredTargets, allTargetsToTest, eventHandler, eventBus, loadingResult),
                 keepGoing,
+                skipIncompatibleExplicitTargets,
                 targetOptions.get(CoreOptions.class).strictConflictChecks,
                 checkForActionConflicts,
+                viewOptions.extraActionTopLevelOnly,
                 executors,
                 /* shouldDiscardAnalysisCache= */ viewOptions.discardAnalysisCache
                     || !skyframeExecutor.tracksStateForIncrementality(),
-                buildDriverKeyTestContext);
+                buildDriverKeyTestContext,
+                skymeldAnalysisOverlapPercentage);
       } else {
         skyframeAnalysisResult =
             skyframeBuildView.configureTargets(
@@ -490,7 +499,10 @@ public class BuildView {
 
         PlatformRestrictionsResult platformRestrictions =
             topLevelConstraintSemantics.checkPlatformRestrictions(
-                skyframeAnalysisResult.getConfiguredTargets(), explicitTargetPatterns, keepGoing);
+                skyframeAnalysisResult.getConfiguredTargets(),
+                explicitTargetPatterns,
+                keepGoing,
+                skipIncompatibleExplicitTargets);
 
         if (!platformRestrictions.targetsWithErrors().isEmpty()) {
           // If there are any errored targets (e.g. incompatible targets that are explicitly
@@ -571,7 +583,7 @@ public class BuildView {
 
     // Coverage
     artifactsToBuild.addAll(
-        getCoverageArtifactsHelper(
+        memoizedGetCoverageArtifactsHelper(
             configuredTargets, allTargetsToTest, eventHandler, eventBus, loadingResult));
 
     // TODO(cparsons): If extra actions are ever removed, this filtering step can probably be
@@ -641,7 +653,9 @@ public class BuildView {
                 ((Artifact.DerivedArtifact) artifact).getGeneratingActionKey();
             ActionLookupValue val;
             try {
-              val = (ActionLookupValue) graph.getValue(generatingActionKey.getActionLookupKey());
+              val =
+                  (ActionLookupValue)
+                      graph.getValue(generatingActionKey.getActionLookupKey().toKey());
             } catch (InterruptedException e) {
               throw new IllegalStateException(
                   "Interruption not expected from this graph: " + generatingActionKey, e);
@@ -806,7 +820,7 @@ public class BuildView {
     // might have injected.
     for (Artifact.DerivedArtifact artifact :
         provider.getTransitiveExtraActionArtifacts().toList()) {
-      ActionLookupKey owner = artifact.getArtifactOwner();
+      ActionLookupKeyOrProxy owner = artifact.getArtifactOwner();
       if (owner instanceof AspectKey) {
         if (aspectClasses.contains(((AspectKey) owner).getAspectClass())) {
           artifacts.add(artifact);
@@ -878,13 +892,16 @@ public class BuildView {
     }
   }
 
-  private ImmutableSet<Artifact> getCoverageArtifactsHelper(
+  private ImmutableSet<Artifact> memoizedGetCoverageArtifactsHelper(
       Set<ConfiguredTarget> configuredTargets,
       Set<ConfiguredTarget> allTargetsToTest,
       EventHandler eventHandler,
       EventBus eventBus,
       TargetPatternPhaseValue loadingResult)
       throws InterruptedException {
+    if (memoizedCoverageArtifacts != null) {
+      return memoizedCoverageArtifacts;
+    }
     ImmutableSet.Builder<Artifact> resultBuilder = ImmutableSet.builder();
     // Coverage
     NestedSet<Artifact> baselineCoverageArtifacts = getBaselineCoverageArtifacts(configuredTargets);
@@ -908,6 +925,7 @@ public class BuildView {
         actionsWrapper.getCoverageOutputs().forEach(resultBuilder::add);
       }
     }
-    return resultBuilder.build();
+    memoizedCoverageArtifacts = resultBuilder.build();
+    return memoizedCoverageArtifacts;
   }
 }
